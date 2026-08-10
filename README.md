@@ -1,52 +1,230 @@
-# AptiGuard - College Aptitude Test Proctoring System
+### AptiGuard
+---
 
-A secure platform where college students take aptitude tests and placement assessments in a controlled examination environment.
+AptiGuard is a secure **college aptitude assessment and online proctoring platform** designed to provide a controlled and distraction-free environment for conducting online aptitude tests.
 
-## Project Structure
+The platform aims to replace traditional Google Form-based aptitude tests with a dedicated assessment system that enables colleges to create, schedule, conduct, monitor, and evaluate aptitude assessments.
 
-This project is separated into independent frontend and backend services:
+### Features
+---
+
+- Secure student registration and login
+- Firebase Authentication
+- Firebase Firestore database
+- Student dashboard
+- Admin dashboard
+- Aptitude test management
+- Question management
+- Test scheduling and assignment
+- Online aptitude assessments
+- Fullscreen test environment
+- Violation detection
+- Warning system for test violations
+- Automatic test submission after repeated violations
+- Automatic test evaluation
+- Student results and performance analytics
+
+### Tech Stack
+---
+
+**Frontend**
+
+- React
+- TypeScript
+- Vite
+- React Router
+- Firebase JavaScript SDK
+
+**Backend**
+
+- Node.js
+- Express.js
+- TypeScript
+- Firebase Admin SDK
+
+**Database**
+
+- Firebase Firestore
+
+**Authentication**
+
+- Firebase Authentication
+- Email/Password Authentication
+
+### Project Structure
+---
 
 ```text
 AptiGuard/
 │
-├── frontend/    # React + TypeScript + Vite + Tailwind CSS Application
-└── backend/     # Node.js + Express + TypeScript API Server
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── pages/
+│   │   ├── routes/
+│   │   ├── context/
+│   │   ├── services/
+│   │   └── config/
+│   │       └── firebase.ts
+│   ├── .env
+│   ├── .env.example
+│   └── package.json
+│
+├── backend/
+│   ├── src/
+│   ├── routes/
+│   ├── controllers/
+│   ├── services/
+│   └── package.json
+│
+└── README.md
 ```
 
+### Current Progress
 ---
 
-## Getting Started
+- ✅ Project setup
+- ✅ Frontend and backend separation
+- ✅ Firebase project setup
+- ✅ Firestore database setup
+- ✅ Login page
+- ✅ Registration page
+- ✅ Firebase Authentication
+- ✅ Student registration
+- ✅ Firebase user creation
+- ✅ Firestore user profile creation
+- ✅ Student login
+- ✅ Student Dashboard UI
+- ✅ Admin Dashboard UI
+- ⏳ Test Management
+- ⏳ Question Management
+- ⏳ Test Assignment
+- ⏳ Secure Assessment Environment
+- ⏳ Online Proctoring
+- ⏳ Automatic Evaluation
+- ⏳ Results & Analytics
 
-### 1. Frontend
-
-The frontend is a standalone React application.
-
-**Run locally:**
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
+### Authentication
 ---
 
-### 2. Backend
+AptiGuard uses Firebase Authentication for secure student registration and login.
 
-The backend is a standalone Node.js and Express API server built with TypeScript.
+**Registration Flow**
 
-**Run locally:**
-```bash
-cd backend
-npm install
-npm run dev
+```text
+Full Name + Email + Password
+            ↓
+Firebase Authentication
+            ↓
+Create User Profile in Firestore
+            ↓
+Registration Successful
+            ↓
+Login
 ```
 
-**Health Check endpoint:**
-- URL: `http://localhost:5000/api/health`
-- Response format:
-  ```json
-  {
-    "status": "ok",
-    "message": "AptiGuard backend is running"
-  }
-  ```
+**Login Flow**
+
+```text
+Email + Password
+       ↓
+Firebase Authentication
+       ↓
+Successful Login
+       ↓
+Student Dashboard
+```
+
+Passwords are managed by Firebase Authentication and are **never stored in Firestore**.
+
+
+### Student Dashboard
+---
+
+The Student Dashboard is the main interface students see after successful authentication.
+
+Students will be able to:
+
+- View available aptitude tests
+- View upcoming tests
+- View completed tests
+- Start assigned tests
+- Read test instructions
+- View test duration and question count
+- View recent test activity
+- Track test performance
+- View results
+- Access profile and account settings
+
+The dashboard is designed specifically around the aptitude assessment workflow rather than generic LMS functionality.
+
+### Admin Dashboard
+---
+
+The Admin Dashboard provides administrators with an overview of the AptiGuard assessment system.
+
+Administrators will be able to:
+
+- View total students
+- View available and active tests
+- Monitor test activity
+- Create aptitude tests
+- Manage questions
+- Schedule assessments
+- Assign tests to students
+- Monitor test attempts
+- View student results
+- Analyze assessment performance
+
+### Aptitude Test
+---
+
+AptiGuard will allow students to take structured online aptitude assessments.
+
+Students will be able to:
+
+- View assigned tests
+- Read test instructions
+- Start tests
+- Answer questions
+- Navigate between questions
+- Track remaining time
+- Save answers
+- Submit tests
+
+A test may contain:
+
+- Test title
+- Description
+- Questions
+- Options
+- Duration
+- Marks
+- Passing score
+- Scheduled date and time
+- Assigned students
+
+### Online Proctoring
+---
+
+AptiGuard will provide a controlled testing environment to reduce common forms of cheating during online aptitude assessments.
+
+Potential violation signals include:
+
+- Exiting fullscreen mode
+- Switching browser tabs
+- Losing browser focus
+- Copy/paste attempts
+- Right-click attempts
+- Certain keyboard shortcuts
+
+These signals will be treated as **violation indicators** rather than guaranteeing that cheating is impossible.
+
+
+
+### Project Goal
+---
+
+AptiGuard aims to provide colleges with a reliable and secure alternative to traditional Google Form-based aptitude tests by combining:
+
+**Assessment Management + Secure Testing + Online Proctoring + Automated Evaluation + Performance Analytics**
