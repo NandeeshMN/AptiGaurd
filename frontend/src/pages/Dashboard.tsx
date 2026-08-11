@@ -14,7 +14,6 @@ import {
   Clock,
   BookOpen,
   TrendingUp,
-  MoreVertical,
   Menu,
   X,
   Plus,
@@ -46,16 +45,6 @@ export const Dashboard: React.FC = () => {
   const studentName = currentUser?.displayName || 'Nandesh M N';
   const userEmail = currentUser?.email || 'student@example.com';
   const initials = isAdmin ? 'A' : studentName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-
-  // Performance line chart coordinates helper (SVG ViewBox 300x100)
-  const linePoints = "10,67.5 80,54 150,36 220,49.5 290,20.25";
-  const dots = [
-    { x: 10, y: 67.5 },
-    { x: 80, y: 54 },
-    { x: 150, y: 36 },
-    { x: 220, y: 49.5 },
-    { x: 290, y: 20.25 }
-  ];
 
   /* ==========================================
      ADMIN DASHBOARD VIEW
@@ -516,17 +505,6 @@ export const Dashboard: React.FC = () => {
               <span>Available Tests</span>
             </button>
             <button
-              onClick={() => setActiveTab('mytests')}
-              className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
-                activeTab === 'mytests'
-                  ? 'bg-blue-50 text-[#0952cc]'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-              }`}
-            >
-              <History className="w-4.5 h-4.5" />
-              <span>My Tests</span>
-            </button>
-            <button
               onClick={() => setActiveTab('results')}
               className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
                 activeTab === 'results'
@@ -626,15 +604,6 @@ export const Dashboard: React.FC = () => {
                 <span>Available Tests</span>
               </button>
               <button
-                onClick={() => { setActiveTab('mytests'); setIsMobileMenuOpen(false); }}
-                className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold ${
-                  activeTab === 'mytests' ? 'bg-blue-50 text-[#0952cc]' : 'text-slate-600'
-                }`}
-              >
-                <History className="w-4.5 h-4.5" />
-                <span>My Tests</span>
-              </button>
-              <button
                 onClick={() => { setActiveTab('results'); setIsMobileMenuOpen(false); }}
                 className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold ${
                   activeTab === 'results' ? 'bg-blue-50 text-[#0952cc]' : 'text-slate-600'
@@ -716,8 +685,8 @@ export const Dashboard: React.FC = () => {
           {/* Grid Splits */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
-            {/* Left Column widgets */}
-            <div className="lg:col-span-2 space-y-6">
+            {/* Left Column widgets (Stretched to col-span-3) */}
+            <div className="lg:col-span-3 space-y-6">
               
               {/* Statistic widgets */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -865,92 +834,9 @@ export const Dashboard: React.FC = () => {
 
             </div>
 
-            {/* Right Column widgets */}
-            <div className="space-y-6">
-              
-              {/* Performance visualization */}
-              <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between min-h-[290px]">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-xs font-extrabold text-[#031b4e] uppercase tracking-wide">Your Performance</h4>
-                  <button className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 focus:outline-none">
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="w-full h-32 relative mb-4">
-                  <svg className="w-full h-full" viewBox="0 0 300 100" preserveAspectRatio="none">
-                    <defs>
-                      <linearGradient id="chartGradientStudent" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#0952cc" stopOpacity="0.12" />
-                        <stop offset="100%" stopColor="#0952cc" stopOpacity="0.0" />
-                      </linearGradient>
-                    </defs>
-                    <line x1="0" y1="20" x2="300" y2="20" stroke="#f1f5f9" strokeWidth="1" />
-                    <line x1="0" y1="50" x2="300" y2="50" stroke="#f1f5f9" strokeWidth="1" />
-                    <line x1="0" y1="80" x2="300" y2="80" stroke="#f1f5f9" strokeWidth="1" />
-                    
-                    <path
-                      d={`M 10,100 L ${linePoints} L 290,100 Z`}
-                      fill="url(#chartGradientStudent)"
-                    />
-                    <polyline
-                      fill="none"
-                      stroke="#0952cc"
-                      strokeWidth="2.5"
-                      points={linePoints}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    {dots.map((dot, i) => (
-                      <circle
-                        key={i}
-                        cx={dot.x}
-                        cy={dot.y}
-                        r="3"
-                        fill="#0952cc"
-                        stroke="#ffffff"
-                        strokeWidth="1.5"
-                      />
-                    ))}
-                  </svg>
-                </div>
-
-                <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-3 flex items-start space-x-3">
-                  <TrendingUp className="w-5 h-5 text-[#0952cc] mt-0.5 flex-shrink-0" />
-                  <div>
-                    <h5 className="text-[11px] font-bold text-slate-800 mb-0.5">Positive Trend</h5>
-                    <p className="text-[10px] text-slate-500 font-medium">You're performing 8% better than your previous average.</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Upcoming Test alert card */}
-              <div className="bg-[#031b4e] text-white rounded-xl p-5 shadow-sm relative overflow-hidden flex flex-col justify-between min-h-[220px]">
-                <div className="absolute right-[-15px] bottom-[-15px] text-slate-700/20 opacity-15 pointer-events-none">
-                  <Clock className="w-32 h-32" />
-                </div>
-
-                <div className="relative z-10">
-                  <div className="inline-flex items-center space-x-1.5 bg-blue-500/20 text-blue-300 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider mb-4 border border-blue-500/30">
-                    <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-ping" />
-                    <span>Upcoming Test</span>
-                  </div>
-                  <h4 className="text-sm font-extrabold text-white mb-2 leading-tight">Logical Reasoning Assessment</h4>
-                  <div className="space-y-1.5 text-[11px] text-slate-300 font-medium">
-                    <div className="flex items-center space-x-2">
-                      <Clock className="w-3.5 h-3.5 text-blue-400" />
-                      <span>Today · 7:00 PM - 7:45 PM</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="relative z-10 pt-4">
-                  <button className="w-full py-2 bg-white hover:bg-slate-50 text-[#031b4e] text-[11px] font-extrabold rounded-lg tracking-wider uppercase transition-colors duration-200">
-                    PREPARE NOW
-                  </button>
-                </div>
-              </div>
-
+            {/* Right Column widgets (Removed Performance and Upcoming Test) */}
+            <div className="hidden lg:block space-y-6">
+              {/* Sidebar column remains hidden or clean spacer as requested */}
             </div>
 
           </div>
