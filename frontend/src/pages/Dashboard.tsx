@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Logo } from '../components/auth/Logo';
+import { AvailableTestsView } from './AvailableTestsView';
+import { ResultsView } from './ResultsView';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -682,164 +684,173 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
 
-          {/* Grid Splits */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* Left Column widgets (Stretched to col-span-3) */}
-            <div className="lg:col-span-3 space-y-6">
-              
-              {/* Statistic widgets */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-xs">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Available Tests</p>
-                  <h3 className="text-2xl font-extrabold text-[#031b4e]">03</h3>
-                  <p className="text-[9px] font-semibold text-[#0952cc] uppercase mt-1 leading-tight">Tests Available for you</p>
+          {/* Dynamic Subview Router */}
+          {activeTab === 'dashboard' ? (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Left Column widgets (Stretched to col-span-3) */}
+              <div className="lg:col-span-3 space-y-6">
+                
+                {/* Statistic widgets */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-xs">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Available Tests</p>
+                    <h3 className="text-2xl font-extrabold text-[#031b4e]">03</h3>
+                    <p className="text-[9px] font-semibold text-[#0952cc] uppercase mt-1 leading-tight">Tests Available for you</p>
+                  </div>
+
+                  <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-xs">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Completed Tests</p>
+                    <h3 className="text-2xl font-extrabold text-[#031b4e]">08</h3>
+                    <p className="text-[9px] font-semibold text-emerald-600 uppercase mt-1 leading-tight">Successfully Completed</p>
+                  </div>
+
+                  <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-xs">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Average Score</p>
+                    <h3 className="text-2xl font-extrabold text-[#031b4e]">78%</h3>
+                    <p className="text-[9px] font-semibold text-indigo-600 uppercase mt-1 leading-tight">Across Completed Tests</p>
+                  </div>
+
+                  <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-xs">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Best Score</p>
+                    <h3 className="text-2xl font-extrabold text-[#031b4e]">92%</h3>
+                    <p className="text-[9px] font-semibold text-amber-600 uppercase mt-1 leading-tight">Highest Score Achieved</p>
+                  </div>
                 </div>
 
-                <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-xs">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Completed Tests</p>
-                  <h3 className="text-2xl font-extrabold text-[#031b4e]">08</h3>
-                  <p className="text-[9px] font-semibold text-emerald-600 uppercase mt-1 leading-tight">Successfully Completed</p>
+                {/* Available Tests */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Available Tests</h3>
+                    <button className="text-xs font-bold text-[#0952cc] hover:underline" onClick={() => setActiveTab('available')}>View All &rarr;</button>
+                  </div>
+
+                  {/* Test 1 */}
+                  <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:border-blue-200 transition-colors duration-200">
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <h4 className="text-xs font-extrabold text-slate-900 leading-tight">Quantitative Aptitude Assessment</h4>
+                        <span className="px-2 py-0.5 rounded text-[8px] font-semibold uppercase bg-blue-50 text-[#0952cc] border border-blue-100">Available</span>
+                      </div>
+                      <div className="flex items-center space-x-4 text-[11px] text-slate-500 font-medium">
+                        <span className="flex items-center space-x-1">
+                          <TrendingUp className="w-3.5 h-3.5" />
+                          <span>Intermediate</span>
+                        </span>
+                        <span className="flex items-center space-x-1">
+                          <BookOpen className="w-3.5 h-3.5" />
+                          <span>30 Qs</span>
+                        </span>
+                        <span className="flex items-center space-x-1">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>30 min</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex sm:flex-col items-start sm:items-end justify-between w-full sm:w-auto pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                      <div className="text-[10px] text-slate-400 font-bold mb-1">
+                        SCHEDULED: <span className="text-slate-700">Today, 7:00 PM</span>
+                      </div>
+                      <button className="px-4 py-2 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white text-[11px] font-bold rounded-lg transition-colors focus:outline-none">
+                        START TEST
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Test 2 */}
+                  <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:border-blue-200 transition-colors duration-200">
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <h4 className="text-xs font-extrabold text-slate-900 leading-tight">Logical Reasoning Assessment</h4>
+                        <span className="px-2 py-0.5 rounded text-[8px] font-semibold uppercase bg-blue-50 text-[#0952cc] border border-blue-100">Available</span>
+                      </div>
+                      <div className="flex items-center space-x-4 text-[11px] text-slate-500 font-medium">
+                        <span className="flex items-center space-x-1">
+                          <TrendingUp className="w-3.5 h-3.5" />
+                          <span>Advanced</span>
+                        </span>
+                        <span className="flex items-center space-x-1">
+                          <BookOpen className="w-3.5 h-3.5" />
+                          <span>25 Qs</span>
+                        </span>
+                        <span className="flex items-center space-x-1">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>45 min</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex sm:flex-col items-start sm:items-end justify-between w-full sm:w-auto pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                      <div className="text-[10px] text-slate-400 font-bold mb-1">
+                        SCHEDULED: <span className="text-slate-700">Tomorrow, 10:00 AM</span>
+                      </div>
+                      <button className="px-4 py-2 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white text-[11px] font-bold rounded-lg transition-colors focus:outline-none">
+                        START TEST
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-xs">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Average Score</p>
-                  <h3 className="text-2xl font-extrabold text-[#031b4e]">78%</h3>
-                  <p className="text-[9px] font-semibold text-indigo-600 uppercase mt-1 leading-tight">Across Completed Tests</p>
+                {/* Recent Activity */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Recent Activity</h3>
+                  <div className="bg-white rounded-xl border border-slate-200/80 overflow-hidden shadow-xs">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50/70 border-b border-slate-100 text-[10px] font-extrabold text-slate-400 tracking-wider uppercase">
+                            <th className="py-3 px-4">Test</th>
+                            <th className="py-3 px-4">Date</th>
+                            <th className="py-3 px-4">Score</th>
+                            <th className="py-3 px-4">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-xs font-semibold">
+                          <tr>
+                            <td className="py-3.5 px-4 text-slate-800">Quantitative Aptitude</td>
+                            <td className="py-3.5 px-4 text-slate-500">Aug 8, 2026</td>
+                            <td className="py-3.5 px-4 text-slate-900 font-bold">84%</td>
+                            <td className="py-3.5 px-4">
+                              <span className="inline-flex px-2 py-0.5 rounded text-[8px] font-extrabold uppercase bg-emerald-50 text-emerald-700 border border-emerald-100">Completed</span>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td className="py-3.5 px-4 text-slate-800">Logical Reasoning</td>
+                            <td className="py-3.5 px-4 text-slate-500">Aug 5, 2026</td>
+                            <td className="py-3.5 px-4 text-slate-900 font-bold">76%</td>
+                            <td className="py-3.5 px-4">
+                              <span className="inline-flex px-2 py-0.5 rounded text-[8px] font-extrabold uppercase bg-emerald-50 text-emerald-700 border border-emerald-100">Completed</span>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td className="py-3.5 px-4 text-slate-800">Verbal Ability</td>
+                            <td className="py-3.5 px-4 text-slate-500">Aug 2, 2026</td>
+                            <td className="py-3.5 px-4 text-slate-900 font-bold">91%</td>
+                            <td className="py-3.5 px-4">
+                              <span className="inline-flex px-2 py-0.5 rounded text-[8px] font-extrabold uppercase bg-emerald-50 text-emerald-700 border border-emerald-100">Completed</span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-xs">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Best Score</p>
-                  <h3 className="text-2xl font-extrabold text-[#031b4e]">92%</h3>
-                  <p className="text-[9px] font-semibold text-amber-600 uppercase mt-1 leading-tight">Highest Score Achieved</p>
-                </div>
               </div>
 
-              {/* Available Tests */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Available Tests</h3>
-                  <button className="text-xs font-bold text-[#0952cc] hover:underline">View All &rarr;</button>
-                </div>
-
-                {/* Test 1 */}
-                <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:border-blue-200 transition-colors duration-200">
-                  <div className="space-y-2">
-                    <div className="flex items-center space-x-2">
-                      <h4 className="text-xs font-extrabold text-slate-900 leading-tight">Quantitative Aptitude Assessment</h4>
-                      <span className="px-2 py-0.5 rounded text-[8px] font-semibold uppercase bg-blue-50 text-[#0952cc] border border-blue-100">Available</span>
-                    </div>
-                    <div className="flex items-center space-x-4 text-[11px] text-slate-500 font-medium">
-                      <span className="flex items-center space-x-1">
-                        <TrendingUp className="w-3.5 h-3.5" />
-                        <span>Intermediate</span>
-                      </span>
-                      <span className="flex items-center space-x-1">
-                        <BookOpen className="w-3.5 h-3.5" />
-                        <span>30 Qs</span>
-                      </span>
-                      <span className="flex items-center space-x-1">
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>30 min</span>
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex sm:flex-col items-start sm:items-end justify-between w-full sm:w-auto pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-                    <div className="text-[10px] text-slate-400 font-bold mb-1">
-                      SCHEDULED: <span className="text-slate-700">Today, 7:00 PM</span>
-                    </div>
-                    <button className="px-4 py-2 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white text-[11px] font-bold rounded-lg transition-colors focus:outline-none">
-                      START TEST
-                    </button>
-                  </div>
-                </div>
-
-                {/* Test 2 */}
-                <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:border-blue-200 transition-colors duration-200">
-                  <div className="space-y-2">
-                    <div className="flex items-center space-x-2">
-                      <h4 className="text-xs font-extrabold text-slate-900 leading-tight">Logical Reasoning Assessment</h4>
-                      <span className="px-2 py-0.5 rounded text-[8px] font-semibold uppercase bg-blue-50 text-[#0952cc] border border-blue-100">Available</span>
-                    </div>
-                    <div className="flex items-center space-x-4 text-[11px] text-slate-500 font-medium">
-                      <span className="flex items-center space-x-1">
-                        <TrendingUp className="w-3.5 h-3.5" />
-                        <span>Advanced</span>
-                      </span>
-                      <span className="flex items-center space-x-1">
-                        <BookOpen className="w-3.5 h-3.5" />
-                        <span>25 Qs</span>
-                      </span>
-                      <span className="flex items-center space-x-1">
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>45 min</span>
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex sm:flex-col items-start sm:items-end justify-between w-full sm:w-auto pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-                    <div className="text-[10px] text-slate-400 font-bold mb-1">
-                      SCHEDULED: <span className="text-slate-700">Tomorrow, 10:00 AM</span>
-                    </div>
-                    <button className="px-4 py-2 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white text-[11px] font-bold rounded-lg transition-colors focus:outline-none">
-                      START TEST
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Recent Activity */}
-              <div className="space-y-4">
-                <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Recent Activity</h3>
-                <div className="bg-white rounded-xl border border-slate-200/80 overflow-hidden shadow-xs">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50/70 border-b border-slate-100 text-[10px] font-extrabold text-slate-400 tracking-wider uppercase">
-                          <th className="py-3 px-4">Test</th>
-                          <th className="py-3 px-4">Date</th>
-                          <th className="py-3 px-4">Score</th>
-                          <th className="py-3 px-4">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-xs font-semibold">
-                        <tr>
-                          <td className="py-3.5 px-4 text-slate-800">Quantitative Aptitude</td>
-                          <td className="py-3.5 px-4 text-slate-500">Aug 8, 2026</td>
-                          <td className="py-3.5 px-4 text-slate-900 font-bold">84%</td>
-                          <td className="py-3.5 px-4">
-                            <span className="inline-flex px-2 py-0.5 rounded text-[8px] font-extrabold uppercase bg-emerald-50 text-emerald-700 border border-emerald-100">Completed</span>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td className="py-3.5 px-4 text-slate-800">Logical Reasoning</td>
-                          <td className="py-3.5 px-4 text-slate-500">Aug 5, 2026</td>
-                          <td className="py-3.5 px-4 text-slate-900 font-bold">76%</td>
-                          <td className="py-3.5 px-4">
-                            <span className="inline-flex px-2 py-0.5 rounded text-[8px] font-extrabold uppercase bg-emerald-50 text-emerald-700 border border-emerald-100">Completed</span>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td className="py-3.5 px-4 text-slate-800">Verbal Ability</td>
-                          <td className="py-3.5 px-4 text-slate-500">Aug 2, 2026</td>
-                          <td className="py-3.5 px-4 text-slate-900 font-bold">91%</td>
-                          <td className="py-3.5 px-4">
-                            <span className="inline-flex px-2 py-0.5 rounded text-[8px] font-extrabold uppercase bg-emerald-50 text-emerald-700 border border-emerald-100">Completed</span>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+              {/* Right Column widgets (Removed Performance and Upcoming Test) */}
+              <div className="hidden lg:block space-y-6">
+                {/* Sidebar column remains hidden or clean spacer as requested */}
               </div>
 
             </div>
-
-            {/* Right Column widgets (Removed Performance and Upcoming Test) */}
-            <div className="hidden lg:block space-y-6">
-              {/* Sidebar column remains hidden or clean spacer as requested */}
+          ) : activeTab === 'available' ? (
+            <AvailableTestsView />
+          ) : activeTab === 'results' ? (
+            <ResultsView />
+          ) : (
+            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-500 font-medium">
+              This page section is currently under development.
             </div>
-
-          </div>
+          )}
 
         </main>
       </div>
