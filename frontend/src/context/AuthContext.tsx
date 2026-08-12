@@ -5,6 +5,7 @@ import {
   createUserWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
+  updateProfile,
 } from 'firebase/auth';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -44,12 +45,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
     const user = userCredential.user;
 
-    // Create a corresponding document inside users/{uid} collection in Firestore
+    // Update Firebase Auth displayName so currentUser.displayName is immediately populated
+    try {
+      await updateProfile(user, { displayName: data.fullName });
+    } catch (e) {
+      console.warn('Could not update Auth displayName:', e);
+    }
+
+    // Create a corresponding student document inside users/{uid} collection in Firestore
     await setDoc(doc(db, 'users', user.uid), {
       uid: user.uid,
+      name: data.fullName,
       fullName: data.fullName,
       email: data.email,
       role: 'student',
+      status: 'Active',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
