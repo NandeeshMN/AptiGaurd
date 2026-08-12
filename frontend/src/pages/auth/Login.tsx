@@ -13,16 +13,18 @@ import { getFriendlyErrorMessage } from '../../config/errorHelper';
 
 interface LoginProps {
   onSwitchMode: () => void;
+  onForgotPassword: (email: string) => void;
   defaultEmail?: string;
   registrationSuccessMsg?: string | null;
 }
 
 export const Login: React.FC<LoginProps> = ({
   onSwitchMode,
+  onForgotPassword,
   defaultEmail = '',
   registrationSuccessMsg = null,
 }) => {
-  const { login, resetPassword } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -70,28 +72,10 @@ export const Login: React.FC<LoginProps> = ({
     }
   };
 
-  const handleForgotPassword = async (e: React.MouseEvent) => {
+  const handleForgotPasswordClick = (e: React.MouseEvent) => {
     e.preventDefault();
     const email = getValues('email');
-
-    if (!email) {
-      setErrorMsg('Please enter your email address first to reset your password.');
-      setSuccessMsg(null);
-      return;
-    }
-
-    setIsLoading(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    try {
-      await resetPassword(email);
-      setSuccessMsg('A password reset link has been sent to your email address.');
-      setIsLoading(false);
-    } catch (error: any) {
-      setErrorMsg(getFriendlyErrorMessage(error));
-      setIsLoading(false);
-    }
+    onForgotPassword(email || '');
   };
 
   return (
@@ -149,12 +133,12 @@ export const Login: React.FC<LoginProps> = ({
           showForgotPassword
           error={errors.password?.message}
           {...register('password')}
-          onForgotPasswordClick={handleForgotPassword}
+          onForgotPasswordClick={handleForgotPasswordClick}
         />
 
         <div className="pt-2">
           <AuthButton type="submit" isLoading={isLoading}>
-            {isLoading ? 'Logging in...' : 'Log in \u2192'}
+            {isLoading ? 'Logging in...' : 'Log in →'}
           </AuthButton>
         </div>
       </form>

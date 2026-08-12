@@ -1,56 +1,256 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Search, Clock, MoreVertical } from 'lucide-react';
+import { collection, doc, getDoc, query, where, onSnapshot } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { useAuth } from '../context/AuthContext';
+import { useIsMobileDevice } from '../utils/deviceDetection';
+import { formatTimeTo12Hour, formatTimeWindow } from '../utils/timeFormat';
+
+/**
+ * 5-Tier Priority System Helper for Candidate Test Card Status & Button
+ */
+export const getCandidateTestCardStatus = (test: any, userAttempt: any, nowMs: number) => {
+  let startTimeMs = 0;
+  let endTimeMs = Infinity;
+
+  if (test.availabilityType === 'immediate') {
+    const createdMs = test.createdAt?.seconds ? test.createdAt.seconds * 1000 : (test.createdAtMs || Date.now());
+    startTimeMs = createdMs;
+    endTimeMs = createdMs + 365 * 24 * 60 * 60 * 1000;
+  } else {
+    const sDate = test.startDate || '';
+    const sTime = test.startTime || '00:00';
+    const eDate = test.endDate || sDate;
+    const eTime = test.endTime || '23:59';
+    
+    const startMs = new Date(`${sDate}T${sTime}:00`).getTime();
+    const endMs = new Date(`${eDate}T${eTime}:00`).getTime();
+
+    startTimeMs = isNaN(startMs) ? 0 : startMs;
+    endTimeMs = isNaN(endMs) ? Infinity : endMs;
+  }
+
+  // 1. Submitted / Completed Attempt Check
+  if (userAttempt && (userAttempt.status === 'submitted' || userAttempt.status === 'auto_submitted')) {
+    const isProctoringExit = userAttempt.submissionReason === 'maximum_exit_limit';
+    const subText = isProctoringExit
+      ? 'PROCTORING SUBMISSION: Automatically submitted due to 3 violations.'
+      : 'TEST SUBMITTED: Assessment completed.';
+
+    return {
+      statusLabel: 'COMPLETED',
+      actionText: 'Test Completed',
+      isEnabled: false,
+      badgeColor: isProctoringExit ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-slate-100 text-slate-600 border-slate-200',
+      buttonStyle: 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-75 select-none',
+      scheduledText: subText,
+      borderColor: isProctoringExit ? 'border-t-amber-500' : 'border-t-slate-400',
+    };
+  }
+
+  // 2. Active in-progress attempt check
+  if (userAttempt && userAttempt.status === 'in_progress' && nowMs < userAttempt.expiresAtMs) {
+    return {
+      statusLabel: 'AVAILABLE',
+      actionText: 'Resume Test',
+      isEnabled: true,
+      badgeColor: 'bg-[#eff6ff] text-[#0952cc] border-[#dbeafe]',
+      buttonStyle: 'bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white cursor-pointer shadow-xs',
+      scheduledText: test.endTime ? `Ends at ${formatTimeTo12Hour(test.endTime)}` : 'In Progress',
+      borderColor: 'border-t-[#0952cc]',
+    };
+  }
+
+  // 3. Before start time check
+  if (nowMs < startTimeMs) {
+    const displayStart = test.startTime ? formatTimeTo12Hour(test.startTime) : 'scheduled time';
+    return {
+      statusLabel: 'UPCOMING',
+      actionText: `Starts at ${displayStart}`,
+      isEnabled: false,
+      badgeColor: 'bg-amber-50 text-amber-700 border-amber-100',
+      buttonStyle: 'bg-amber-100/70 border border-amber-200 text-amber-800 cursor-not-allowed opacity-90',
+      scheduledText: `Starts at ${test.startDate ? test.startDate + ' ' : ''}${displayStart}`,
+      borderColor: 'border-t-amber-500',
+    };
+  }
+
+  // 4. After end time check
+  if (nowMs >= endTimeMs) {
+    return {
+      statusLabel: 'EXPIRED',
+      actionText: 'Test Window Closed',
+      isEnabled: false,
+      badgeColor: 'bg-slate-100 text-slate-500 border-slate-200',
+      buttonStyle: 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-75',
+      scheduledText: 'Test Window Closed',
+      borderColor: 'border-t-slate-350',
+    };
+  }
+
+  // 5. Start Test (Available now inside schedule window)
+  return {
+    statusLabel: 'AVAILABLE',
+    actionText: 'Start Test',
+    isEnabled: true,
+    badgeColor: 'bg-[#eff6ff] text-[#0952cc] border-[#dbeafe]',
+    buttonStyle: 'bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white cursor-pointer shadow-xs',
+    scheduledText: test.availabilityType === 'immediate' ? 'Available Now' : `Window: ${formatTimeWindow(test.startTime, test.endTime)}`,
+    borderColor: 'border-t-[#0952cc]',
+  };
+};
 
 export const AvailableTestsView: React.FC = () => {
-  const [filter, setFilter] = useState<'all' | 'available' | 'upcoming' | 'completed'>('all');
+  const navigate = useNavigate();
+  const { currentUser } = useAuth();
+  const isMobile = useIsMobileDevice();
+  const [filter, setFilter] = useState<'all' | 'available' | 'upcoming'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('date');
+  const [tests, setTests] = useState<any[]>([]);
+  const [userAttemptsMap, setUserAttemptsMap] = useState<Map<string, any>>(new Map());
+  const [loading, setLoading] = useState(true);
+  const [nowMs, setNowMs] = useState(Date.now());
 
-  // Static assessment cards matching the visual reference image
-  const assessments = [
-    {
-      id: 1,
-      title: 'Quantitative Aptitude Assessment',
-      difficulty: 'Intermediate',
-      status: 'AVAILABLE',
-      questions: 30,
-      duration: '30 Mins',
-      marks: 100,
-      scheduled: 'Today, 7:00 PM',
-      borderColor: 'border-t-[#0952cc]',
-      colorTheme: '#0952cc',
-      actionText: 'START TEST',
-    },
-    {
-      id: 2,
-      title: 'Logical Reasoning Assessment',
-      difficulty: 'Intermediate',
-      status: 'UPCOMING',
-      questions: 25,
-      duration: '25 Mins',
-      marks: 100,
-      scheduled: 'Tmrw, 10:00 AM',
-      borderColor: 'border-t-amber-600',
-      colorTheme: '#b45309',
-      actionText: 'VIEW DETAILS',
-    },
-    {
-      id: 3,
-      title: 'Verbal Ability Assessment',
-      difficulty: 'Beginner',
-      status: 'UPCOMING',
-      questions: 30,
-      duration: '20 Mins',
-      marks: 100,
-      scheduled: 'Aug 14, 2026',
-      borderColor: 'border-t-slate-350',
-      colorTheme: '#64748b',
-      actionText: 'VIEW DETAILS',
+  // Real-time 1-second ticker so card buttons update dynamically at start/end times
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    setLoading(true);
+
+    // 1. Realtime listener for published tests
+    const qTests = query(collection(db, 'tests'), where('status', '==', 'published'));
+    const unsubscribeTests = onSnapshot(
+      qTests,
+      async (snapshot) => {
+        try {
+          const list: any[] = [];
+          for (const docSnap of snapshot.docs) {
+            const data = docSnap.data();
+            if (data.assignmentType === 'all') {
+              list.push({ id: docSnap.id, ...data });
+            } else {
+              const assignedRef = doc(db, 'tests', docSnap.id, 'assignedStudents', currentUser.uid);
+              const assignedSnap = await getDoc(assignedRef);
+              if (assignedSnap.exists()) {
+                list.push({ id: docSnap.id, ...data });
+              }
+            }
+          }
+          setTests(list);
+        } catch (err) {
+          console.error('Error processing real-time tests snapshot:', err);
+        } finally {
+          setLoading(false);
+        }
+      },
+      (err) => {
+        console.error('Error in tests real-time listener:', err);
+        setLoading(false);
+      }
+    );
+
+    // 2. Realtime listener for candidate attempts
+    const qAttempts = query(
+      collection(db, 'testAttempts'),
+      where('userId', '==', currentUser.uid)
+    );
+    const unsubscribeAttempts = onSnapshot(
+      qAttempts,
+      (snapshot) => {
+        const attMap = new Map<string, any>();
+        snapshot.forEach((docSnap) => {
+          const att = { id: docSnap.id, ...docSnap.data() } as any;
+          const existing = attMap.get(att.testId);
+          if (!existing || att.status === 'submitted' || att.status === 'auto_submitted') {
+            attMap.set(att.testId, att);
+          }
+        });
+        setUserAttemptsMap(attMap);
+      },
+      (err) => {
+        console.error('Error in attempts real-time listener:', err);
+      }
+    );
+
+    return () => {
+      unsubscribeTests();
+      unsubscribeAttempts();
+    };
+  }, [currentUser]);
+
+  // Map processed assessment cards with 5-tier status priority
+  const processedAssessments = tests.map(test => {
+    const userAttempt = userAttemptsMap.get(test.id);
+    const cardStatus = getCandidateTestCardStatus(test, userAttempt, nowMs);
+
+    let isEnabled = cardStatus.isEnabled;
+    let actionText = cardStatus.actionText;
+    let buttonStyle = cardStatus.buttonStyle;
+    let scheduledText = cardStatus.scheduledText;
+
+    // Apply mobile device restriction to active/startable tests
+    if (isMobile && cardStatus.isEnabled) {
+      isEnabled = false;
+      actionText = 'Desktop or Laptop Required';
+      buttonStyle = 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-75 select-none';
+      scheduledText = 'Desktop or Laptop Required: Proctored assessments can only be taken on a desktop or laptop.';
     }
-  ];
+
+    return {
+      id: test.id,
+      title: test.title || 'Untitled Assessment',
+      difficulty: test.difficulty || 'Intermediate',
+      status: cardStatus.statusLabel,
+      questions: test.targetQuestions || 0,
+      duration: test.duration ? `${test.duration} Mins` : 'N/A',
+      marks: test.targetMarks || 0,
+      scheduled: scheduledText,
+      borderColor: cardStatus.borderColor,
+      actionText,
+      isEnabled,
+      buttonStyle,
+      badgeColor: cardStatus.badgeColor,
+      createdAt: test.createdAt,
+    };
+  });
+
+  // Only AVAILABLE and active student-submitted COMPLETED tests display under Available Tests menu.
+  // UPCOMING tests display under the main Dashboard overview, and EXPIRED tests display under Completed Tests menu.
+  const activeAssessments = processedAssessments.filter(item => item.status === 'AVAILABLE' || item.status === 'COMPLETED');
+
+  // Priority sorting: AVAILABLE tests first, then COMPLETED (within active schedule window)
+  const statusOrder: Record<string, number> = {
+    AVAILABLE: 1,
+    COMPLETED: 2,
+    EXPIRED: 3,
+  };
+
+  const sortedAssessments = [...activeAssessments].sort((a, b) => {
+    const priorityA = statusOrder[a.status] || 99;
+    const priorityB = statusOrder[b.status] || 99;
+
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB;
+    }
+
+    if (sortBy === 'questions') {
+      return b.questions - a.questions;
+    }
+    if (sortBy === 'duration') {
+      const getMin = (d: string) => parseInt(d) || 0;
+      return getMin(b.duration) - getMin(a.duration);
+    }
+    return b.id.localeCompare(a.id);
+  });
 
   // Filtering logic
-  const filteredAssessments = assessments.filter(item => {
+  const filteredAssessments = sortedAssessments.filter(item => {
     const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase());
     if (filter === 'all') return matchesSearch;
     return matchesSearch && item.status.toLowerCase() === filter.toLowerCase();
@@ -62,7 +262,7 @@ export const AvailableTestsView: React.FC = () => {
       {/* Title & Description Headers */}
       <div>
         <h2 className="text-[26px] font-extrabold text-slate-900 leading-tight">Available Tests</h2>
-        <p className="text-xs text-slate-500 font-medium">Explore assessments assigned to you and start your next aptitude challenge.</p>
+        <p className="text-xs text-slate-500 font-medium">Explore active assessments assigned to you.</p>
       </div>
 
       {/* Filters row section */}
@@ -83,7 +283,7 @@ export const AvailableTestsView: React.FC = () => {
         {/* Tab pills & Sort dropdowns */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="bg-slate-100/80 p-0.5 rounded-lg flex space-x-1 border border-slate-200/50">
-            {(['all', 'available', 'upcoming', 'completed'] as const).map((tab) => (
+            {(['all', 'available'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setFilter(tab)}
@@ -112,76 +312,81 @@ export const AvailableTestsView: React.FC = () => {
       </div>
 
       {/* Grid listing assessment cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {filteredAssessments.map((test) => (
-          <div
-            key={test.id}
-            className={`bg-white rounded-xl border border-slate-200/80 border-t-4 ${test.borderColor} shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between overflow-hidden min-h-[380px]`}
-          >
-            {/* Header detail */}
-            <div className="p-5 flex-1">
-              <div className="flex justify-between items-start mb-4">
-                <span 
-                  className="px-2 py-0.5 rounded text-[8px] font-extrabold uppercase border"
-                  style={{
-                    backgroundColor: test.status === 'AVAILABLE' ? '#eff6ff' : '#f8fafc',
-                    color: test.status === 'AVAILABLE' ? '#0952cc' : '#475569',
-                    borderColor: test.status === 'AVAILABLE' ? '#dbeafe' : '#e2e8f0',
-                  }}
+      {loading ? (
+        <div className="text-center py-12 text-xs font-semibold text-slate-500">
+          Loading assigned assessments...
+        </div>
+      ) : filteredAssessments.length === 0 ? (
+        <div className="bg-white rounded-xl border border-slate-200/80 p-8 text-center text-slate-500 font-semibold shadow-xs">
+          No assessments found matching the filter/search criteria.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {filteredAssessments.map((test) => (
+            <div
+              key={test.id}
+              className={`bg-white rounded-xl border border-slate-200/80 border-t-4 ${test.borderColor} shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between overflow-hidden min-h-[380px]`}
+            >
+              {/* Header detail */}
+              <div className="p-5 flex-1">
+                <div className="flex justify-between items-start mb-4">
+                  <span className={`px-2 py-0.5 rounded text-[8px] font-extrabold uppercase border ${test.badgeColor}`}>
+                    {test.status}
+                  </span>
+                  <button className="p-1 rounded hover:bg-slate-100 text-slate-400 focus:outline-none">
+                    <MoreVertical className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <h3 className="text-sm font-extrabold text-slate-900 leading-snug mb-1">
+                  {test.title}
+                </h3>
+                <p className="text-[11px] text-slate-500 font-medium mb-5">
+                  &bull; {test.difficulty}
+                </p>
+
+                {/* Grid properties */}
+                <div className="grid grid-cols-3 gap-2.5 mb-3">
+                  <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Questions</span>
+                    <span className="text-xs font-bold text-slate-800">{test.questions}</span>
+                  </div>
+                  <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 flex flex-col">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Duration</span>
+                    <span className="text-xs font-bold text-slate-800 flex items-center space-x-1">
+                      <Clock className="w-3.5 h-3.5 text-slate-400" />
+                      <span>{test.duration}</span>
+                    </span>
+                  </div>
+                  <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide block mb-0.5">Marks</span>
+                    <span className="text-xs font-bold text-slate-800">{test.marks}</span>
+                  </div>
+                </div>
+
+                {/* Full-Width Schedule / Notice Info Box */}
+                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 mb-3">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Schedule Info</span>
+                  <p className="text-xs font-bold text-[#0952cc] leading-relaxed break-words">
+                    {test.scheduled}
+                  </p>
+                </div>
+              </div>
+
+              {/* Bottom Actions CTA */}
+              <div className="px-5 pb-5 pt-2">
+                <button
+                  disabled={!test.isEnabled}
+                  onClick={() => test.isEnabled && navigate('/test/' + test.id)}
+                  className={`w-full py-2.5 text-[10px] font-bold rounded-lg uppercase tracking-wider transition-colors duration-250 ${test.buttonStyle}`}
                 >
-                  {test.status}
-                </span>
-                <button className="p-1 rounded hover:bg-slate-100 text-slate-400 focus:outline-none">
-                  <MoreVertical className="w-4 h-4" />
+                  {test.actionText}
                 </button>
               </div>
-
-              <h3 className="text-sm font-extrabold text-slate-900 leading-snug mb-1">
-                {test.title}
-              </h3>
-              <p className="text-[11px] text-slate-500 font-medium mb-5">
-                &bull; {test.difficulty}
-              </p>
-
-              {/* Grid properties */}
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Questions</span>
-                  <span className="text-xs font-bold text-slate-800">{test.questions}</span>
-                </div>
-                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex flex-col">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Duration</span>
-                  <span className="text-xs font-bold text-slate-800 flex items-center space-x-1">
-                    <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    <span>{test.duration}</span>
-                  </span>
-                </div>
-                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Marks</span>
-                  <span className="text-xs font-bold text-slate-800">{test.marks}</span>
-                </div>
-                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex flex-col">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Scheduled</span>
-                  <span className="text-xs font-bold text-[#0952cc] truncate">{test.scheduled}</span>
-                </div>
-              </div>
             </div>
-
-            {/* Bottom Actions CTA */}
-            <div className="px-5 pb-5 pt-2">
-              <button
-                className={`w-full py-2.5 text-[10px] font-bold rounded-lg uppercase tracking-wider transition-colors duration-250 ${
-                  test.status === 'AVAILABLE'
-                    ? 'bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white'
-                    : 'bg-blue-50/50 hover:bg-blue-50 text-[#0952cc] border border-blue-100/50'
-                }`}
-              >
-                {test.actionText}
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
     </div>
   );
