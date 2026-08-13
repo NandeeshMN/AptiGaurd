@@ -8,6 +8,39 @@ export interface SendOTPEmailOptions {
   otpCode: string;
 }
 
+const formatDateToDDMMYYYY = (dateVal: any): string => {
+  if (!dateVal) return '';
+  if (typeof dateVal === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(dateVal)) return dateVal;
+  if (typeof dateVal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
+    const [y, m, d] = dateVal.split('-');
+    return `${d}/${m}/${y}`;
+  }
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return String(dateVal);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  } catch {
+    return String(dateVal);
+  }
+};
+
+const formatTimeTo12Hour = (timeStr: any): string => {
+  if (!timeStr || typeof timeStr !== 'string') return '';
+  if (timeStr.includes('AM') || timeStr.includes('PM')) return timeStr;
+  const parts = timeStr.split(':');
+  if (parts.length < 2) return timeStr;
+  let hours = parseInt(parts[0], 10);
+  const minutes = parts[1];
+  if (isNaN(hours)) return timeStr;
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  return `${hours}:${minutes} ${ampm}`;
+};
+
 export const sendOTPEmail = async ({
   recipientEmail,
   recipientName,
@@ -50,67 +83,49 @@ export const sendOTPEmail = async ({
   } else {
     payload.subject = 'Reset Your AptiGuard Password';
     payload.htmlContent = `
-      <!DOCTYPE html>
-      <html>
+      <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+      <html xmlns="http://www.w3.org/1999/xhtml">
       <head>
-        <meta charset="utf-8">
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 30px 15px; }
-          .card { max-width: 520px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; padding: 40px 36px; box-shadow: 0 4px 12px rgba(0,0,0,0.03); }
-          .header { text-align: center; padding-bottom: 24px; border-bottom: 1px solid #f1f5f9; margin-bottom: 32px; }
-          .logo-title { color: #031b4e; font-size: 26px; font-weight: 800; margin: 0; letter-spacing: -0.5px; }
-          .logo-subtitle { color: #64748b; font-size: 13px; font-weight: 500; margin-top: 4px; margin-bottom: 0; }
-          .title { color: #0f172a; font-size: 20px; font-weight: 700; margin-top: 0; margin-bottom: 20px; letter-spacing: -0.3px; }
-          .text { color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 24px; }
-          .otp-card { background-color: #f8fafc; border: 1.5px solid #1e293b; border-radius: 10px; padding: 28px 20px; text-align: center; margin: 28px 0; }
-          .otp-code { font-family: 'Courier New', Courier, monospace; font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #0f172a; margin-bottom: 10px; }
-          .otp-expiry { color: #dc2626; font-size: 13px; font-weight: 600; margin: 0; }
-          .security-text { color: #475569; font-size: 13px; line-height: 1.5; margin-bottom: 24px; }
-          .security-box { background-color: #f0f7ff; border-left: 4px solid #0952cc; border-radius: 6px; padding: 16px 18px; margin: 28px 0; }
-          .security-box-text { color: #334155; font-size: 13px; line-height: 1.5; margin: 0; }
-          .security-box-bold { font-weight: 700; color: #0f172a; }
-          .footer { margin-top: 40px; text-align: center; color: #94a3b8; font-size: 12px; line-height: 1.6; }
-          .footer p { margin: 2px 0; }
-          .footer-brand { color: #64748b; font-weight: 600; }
-        </style>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+        <title>Reset Your AptiGuard Password</title>
       </head>
-      <body>
-        <div class="card">
-          <!-- Header -->
-          <div class="header">
-            <h1 class="logo-title">AptiGuard</h1>
-            <p class="logo-subtitle">Secure College Assessment Platform</p>
-          </div>
-
-          <!-- Main Content -->
-          <h2 class="title">Reset Your AptiGuard Password</h2>
-          
-          <p class="text">Hello <strong>${name}</strong>,</p>
-          <p class="text">We received a request to reset the password for your AptiGuard account. Use the One-Time Password below to continue with your password reset:</p>
-
-          <!-- OTP Box -->
-          <div class="otp-card">
-            <div class="otp-code">${otpCode}</div>
-            <p class="otp-expiry">This OTP is valid for 5 minutes.</p>
-          </div>
-
-          <p class="security-text">For your security, do not share this OTP with anyone.</p>
-
-          <!-- Security Callout Notice -->
-          <div class="security-box">
-            <p class="security-box-text">
-              <span class="security-box-bold">Security Notice:</span> If you did not request a password reset, you can safely ignore this email. Your account remains secure and no action is required.
-            </p>
-          </div>
-
-          <!-- Footer -->
-          <div class="footer">
-            <p>Regards,</p>
-            <p class="footer-brand">AptiGuard Team</p>
-            <p>Secure College Assessment Platform</p>
-            <p style="margin-top: 12px;">&copy; ${currentYear} AptiGuard. All rights reserved.</p>
-          </div>
-        </div>
+      <body style="margin: 0; padding: 0; background-color: #f4f7fb; font-family: Arial, Helvetica, sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f4f7fb; width: 100%;">
+          <tr>
+            <td align="center" style="padding: 30px 15px;">
+              <table role="presentation" width="520" cellpadding="0" cellspacing="0" border="0" style="width: 100%; max-width: 520px; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; padding: 36px;">
+                <tr>
+                  <td align="center" style="border-bottom: 1px solid #f1f5f9; padding-bottom: 20px; font-family: Arial, Helvetica, sans-serif;">
+                    <div style="font-size: 26px; font-weight: 900; color: #0952cc; margin: 0;">AptiGuard</div>
+                    <div style="font-size: 12px; font-weight: 700; color: #64748b; margin-top: 4px;">Secure College Assessment Platform</div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding-top: 24px; font-family: Arial, Helvetica, sans-serif; color: #0f172a;">
+                    <div style="font-size: 20px; font-weight: 700; margin-bottom: 16px;">Reset Your AptiGuard Password</div>
+                    <div style="font-size: 14px; color: #334155; line-height: 1.6; margin-bottom: 12px;">Hello <strong>${name}</strong>,</div>
+                    <div style="font-size: 14px; color: #334155; line-height: 1.6; margin-bottom: 24px;">We received a request to reset the password for your AptiGuard account. Use the One-Time Password below:</div>
+                    <div style="background-color: #f8fafc; border: 1.5px solid #1e293b; border-radius: 10px; padding: 24px; text-align: center; margin-bottom: 24px;">
+                      <div style="font-family: 'Courier New', Courier, monospace; font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #0f172a;">${otpCode}</div>
+                      <div style="color: #dc2626; font-size: 13px; font-weight: 700; margin-top: 8px;">This OTP is valid for 5 minutes.</div>
+                    </div>
+                    <div style="font-size: 13px; color: #475569; line-height: 1.5; margin-bottom: 24px;">For your security, do not share this OTP with anyone.</div>
+                    <div style="background-color: #f0f7ff; border-left: 4px solid #0952cc; border-radius: 6px; padding: 14px 16px; font-size: 13px; color: #334155; line-height: 1.5;">
+                      <strong>Security Notice:</strong> If you did not request a password reset, you can safely ignore this email.
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding-top: 32px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #94a3b8; line-height: 1.6;">
+                    <div>Regards, <strong>AptiGuard Team</strong></div>
+                    <div>&copy; ${currentYear} AptiGuard. All rights reserved.</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
       </body>
       </html>
     `;
@@ -131,15 +146,7 @@ export const sendOTPEmail = async ({
 
     if (!response.ok) {
       const errorMsg = data?.message || data?.code || `HTTP ${response.status}`;
-      console.error('[BrevoService] Failed to send OTP email via Brevo:', errorMsg);
-
-      if (
-        response.status === 400 &&
-        (errorMsg.toLowerCase().includes('sender') || errorMsg.toLowerCase().includes('unverified'))
-      ) {
-        return { success: false, message: 'Brevo sender email is not verified.' };
-      }
-
+      console.error(`[BrevoService] Failed to send OTP email to ${recipientEmail}: ${errorMsg}`);
       return { success: false, message: errorMsg };
     }
 
@@ -177,113 +184,218 @@ export const sendTestUpdateEmail = async ({
   const apiKey = process.env.BREVO_API_KEY;
   const senderEmail = process.env.BREVO_SENDER_EMAIL || 'nandeeshmn12@gmail.com';
   const senderName = process.env.BREVO_SENDER_NAME || 'AptiGuard';
+  const dashboardUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:5173';
 
   if (!apiKey) {
-    console.error('[Test Update Email] Failed: BREVO_API_KEY is missing in environment variables.');
+    console.error(`[Test Updated Email] Recipient: ${recipientEmail} | Status: FAILED (BREVO_API_KEY missing in environment)`);
     return { success: false, message: 'Brevo API key is not configured.' };
   }
 
-  const name = recipientName || recipientEmail.split('@')[0];
+  const cleanEmail = (recipientEmail || '').trim().toLowerCase();
+  if (!cleanEmail) {
+    return { success: false, message: 'Empty recipient email.' };
+  }
+
+  let studentName = (recipientName || '').trim();
+  if (!studentName || studentName.includes('@')) {
+    const prefix = cleanEmail.split('@')[0];
+    studentName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+  }
+
+  const testName = testTitle || 'Assessment';
   const currentYear = new Date().getFullYear();
 
-  const changesListHtml = changedDetails && changedDetails.length > 0
-    ? changedDetails.map(d => `<li style="margin-bottom: 6px; color: #0f172a; font-weight: 600;">${d}</li>`).join('')
-    : '<li style="margin-bottom: 6px; color: #0f172a; font-weight: 600;">Assessment configuration and schedule parameters updated</li>';
+  const changedDetailsHtml = changedDetails && changedDetails.length > 0
+    ? changedDetails.map(d => `<li style="margin-bottom: 6px;">${d}</li>`).join('')
+    : '<li style="margin-bottom: 6px;">Assessment configuration and schedule have been updated.</li>';
 
-  const scheduleText = startDate && startTime && endDate && endTime
-    ? `${startDate} at ${startTime} — ${endDate} at ${endTime}`
-    : startDate && startTime
-      ? `Starts at ${startDate} ${startTime}`
-      : 'Immediate / Active Schedule';
+  const sDateFormatted = startDate ? formatDateToDDMMYYYY(startDate) : '';
+  const eDateFormatted = endDate ? formatDateToDDMMYYYY(endDate) : sDateFormatted;
+  const sTimeFormatted = startTime ? formatTimeTo12Hour(startTime) : '';
+  const eTimeFormatted = endTime ? formatTimeTo12Hour(endTime) : '';
 
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 30px 15px; }
-        .card { max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 14px; border: 1px solid #e2e8f0; overflow: hidden; padding: 40px 36px; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
-        .header { text-align: center; padding-bottom: 24px; border-bottom: 1px solid #f1f5f9; margin-bottom: 32px; }
-        .logo-title { color: #031b4e; font-size: 28px; font-weight: 800; margin: 0; letter-spacing: -0.5px; }
-        .logo-subtitle { color: #64748b; font-size: 13px; font-weight: 500; margin-top: 4px; margin-bottom: 0; }
-        .title { color: #0f172a; font-size: 20px; font-weight: 800; margin-top: 0; margin-bottom: 16px; letter-spacing: -0.3px; }
-        .text { color: #334155; font-size: 14px; line-height: 1.6; margin-bottom: 24px; }
-        .details-card { background-color: #f0f7ff; border-left: 4px solid #0952cc; border-radius: 8px; padding: 20px 24px; margin: 24px 0; }
-        .details-title { color: #031b4e; font-size: 15px; font-weight: 800; margin-top: 0; margin-bottom: 12px; }
-        .details-list { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; }
-        .meta-grid { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 20px; margin: 24px 0; display: table; width: 100%; box-sizing: border-box; }
-        .meta-row { display: table-row; }
-        .meta-cell { display: table-cell; padding: 6px 12px; font-size: 13px; color: #475569; }
-        .meta-label { font-weight: 700; color: #0f172a; width: 140px; }
-        .footer { margin-top: 40px; text-align: center; color: #94a3b8; font-size: 12px; line-height: 1.6; }
-        .footer p { margin: 2px 0; }
-        .footer-brand { color: #64748b; font-weight: 600; }
-      </style>
-    </head>
-    <body>
-      <div class="card">
-        <!-- Header -->
-        <div class="header">
-          <h1 class="logo-title">AptiGuard</h1>
-          <p class="logo-subtitle">Secure College Assessment Platform</p>
-        </div>
+  const startDateTime = sDateFormatted && sTimeFormatted
+    ? `${sDateFormatted} at ${sTimeFormatted}`
+    : sDateFormatted || 'Immediate Access';
 
-        <!-- Main Content -->
-        <h2 class="title">Test Updated: ${testTitle}</h2>
+  const endDateTime = eDateFormatted && eTimeFormatted
+    ? `${eDateFormatted} at ${eTimeFormatted}`
+    : eDateFormatted || 'Flexible Availability';
+
+  // 100% EMAIL-CLIENT COMPATIBLE TABLE-BASED HTML LAYOUT
+  const htmlContent = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AptiGuard | Assessment Updated — ${testName}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f7fb; font-family: Arial, Helvetica, sans-serif;">
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f4f7fb; width: 100%;">
+  <tr>
+    <td align="center" style="padding: 32px 15px;">
+
+      <!-- 600px Max Container Table -->
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width: 100%; max-width: 600px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
         
-        <p class="text">Hello <strong>${name}</strong>,</p>
-        <p class="text">The details of your upcoming AptiGuard assessment have been updated. Please review the updated test information below:</p>
+        <!-- HEADER -->
+        <tr>
+          <td align="center" style="padding: 32px 32px 24px 32px; background-color: #ffffff; border-bottom: 1px solid #f1f5f9; font-family: Arial, Helvetica, sans-serif;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td align="center" style="font-family: Arial, Helvetica, sans-serif;">
+                  <div style="font-size: 26px; font-weight: 900; color: #0952cc; letter-spacing: -0.5px; margin: 0;">APTiGUARD</div>
+                  <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 3px;">Secure Online Assessment Platform</div>
+                </td>
+              </tr>
+              <tr>
+                <td align="center" style="padding-top: 14px;">
+                  <span style="background-color: #e0e7ff; color: #3730a3; font-family: Arial, Helvetica, sans-serif; font-size: 11px; font-weight: 800; padding: 5px 14px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.5px; display: inline-block;">Assessment Update</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
 
-        <!-- Updated Details Callout -->
-        <div class="details-card">
-          <h3 class="details-title">Updated Details</h3>
-          <ul class="details-list">
-            ${changesListHtml}
-          </ul>
-        </div>
+        <!-- CONTENT BODY -->
+        <tr>
+          <td style="padding: 32px; font-family: Arial, Helvetica, sans-serif; color: #1f2937;">
+            
+            <!-- GREETING -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: 700; color: #0f172a; padding-bottom: 12px;">
+                  Hello ${studentName},
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #334155; line-height: 1.6; padding-bottom: 8px;">
+                  The assessment assigned to you has been updated by the administrator.
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #334155; line-height: 1.6; padding-bottom: 24px;">
+                  Please review the revised assessment details below.
+                </td>
+              </tr>
+            </table>
 
-        <!-- Meta Schedule Grid -->
-        <div class="meta-grid">
-          <div class="meta-row">
-            <div class="meta-cell meta-label">Assessment:</div>
-            <div class="meta-cell" style="font-weight: 700; color: #031b4e;">${testTitle}</div>
-          </div>
-          <div class="meta-row">
-            <div class="meta-cell meta-label">Schedule Window:</div>
-            <div class="meta-cell">${scheduleText}</div>
-          </div>
-          ${duration ? `
-          <div class="meta-row">
-            <div class="meta-cell meta-label">Duration:</div>
-            <div class="meta-cell">${duration} Mins</div>
-          </div>
-          ` : ''}
-        </div>
+            <!-- ASSESSMENT & UPDATED INFORMATION CARD -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #0952cc; border-radius: 8px; margin-bottom: 24px;">
+              <tr>
+                <td style="padding: 20px 24px; font-family: Arial, Helvetica, sans-serif;">
+                  <div style="font-size: 11px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Assessment</div>
+                  <div style="font-size: 18px; font-weight: 800; color: #031b4e; margin-bottom: 16px;">${testName}</div>
+                  
+                  <div style="font-size: 12px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Updated Information</div>
+                  <ul style="margin: 0; padding-left: 20px; color: #334155; font-size: 13.5px; line-height: 1.6; font-weight: 600;">
+                    ${changedDetailsHtml}
+                  </ul>
+                </td>
+              </tr>
+            </table>
 
-        <p class="text">Please log in to your AptiGuard Student Portal to view the latest assessment details.</p>
+            <!-- SCHEDULE TABLE -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 24px; overflow: hidden;">
+              <tr>
+                <td style="background-color: #f1f5f9; padding: 12px 20px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0;">
+                  Schedule
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 20px; font-family: Arial, Helvetica, sans-serif;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td width="50%" valign="top" style="padding-right: 10px; font-family: Arial, Helvetica, sans-serif;">
+                        <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 4px;">Start</div>
+                        <div style="font-size: 13.5px; font-weight: 700; color: #0f172a;">${startDateTime}</div>
+                      </td>
+                      <td width="50%" valign="top" style="padding-left: 10px; font-family: Arial, Helvetica, sans-serif;">
+                        <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 4px;">End</div>
+                        <div style="font-size: 13.5px; font-weight: 700; color: #0f172a;">${endDateTime}</div>
+                      </td>
+                    </tr>
+                  </table>
 
-        <!-- Footer -->
-        <div class="footer">
-          <p>Regards,</p>
-          <p class="footer-brand">AptiGuard Team</p>
-          <p>Secure College Assessment Platform</p>
-          <p style="margin-top: 12px;">&copy; ${currentYear} AptiGuard. All rights reserved.</p>
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
+                  <!-- Important Schedule Callout Notice -->
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 16px; background-color: #eff6ff; border-left: 4px solid #2563eb; border-radius: 4px;">
+                    <tr>
+                      <td style="padding: 12px 16px; font-family: Arial, Helvetica, sans-serif; font-size: 12.5px; color: #1e3a8a; line-height: 1.5;">
+                        <strong>IMPORTANT:</strong> The assessment is available only within the scheduled assessment window. If you begin the assessment after the scheduled start time, your available time will be limited by the scheduled end time.
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+
+            <!-- ACTION BUTTON TABLE -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom: 28px;">
+              <tr>
+                <td align="center" style="padding: 8px 0;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td align="center" bgcolor="#0952cc" style="border-radius: 8px;">
+                        <a href="${dashboardUrl}" target="_blank" style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 800; color: #ffffff; text-decoration: none; display: inline-block; padding: 14px 32px; border-radius: 8px; border: 1px solid #0952cc; background-color: #0952cc;">View Assessment Dashboard</a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+
+            <!-- MESSAGE -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="font-family: Arial, Helvetica, sans-serif; font-size: 13.5px; color: #334155; line-height: 1.6; padding-bottom: 4px;">
+                  Please log in to your AptiGuard dashboard to view the latest assessment information.
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family: Arial, Helvetica, sans-serif; font-size: 13.5px; color: #334155; line-height: 1.6;">
+                  Make sure you review the updated schedule before starting the assessment.
+                </td>
+              </tr>
+            </table>
+
+          </td>
+        </tr>
+
+        <!-- FOOTER -->
+        <tr>
+          <td align="center" style="padding: 28px 32px; background-color: #f8fafc; border-top: 1px solid #f1f5f9; font-family: Arial, Helvetica, sans-serif;">
+            <div style="font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 2px;">Regards,</div>
+            <div style="font-size: 14px; font-weight: 800; color: #0952cc; margin-bottom: 8px;">AptiGuard Team</div>
+            <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">Secure &bull; Fair &bull; Proctored</div>
+            <div style="font-size: 11.5px; color: #94a3b8;">&copy; ${currentYear} AptiGuard. All rights reserved.</div>
+          </td>
+        </tr>
+
+      </table>
+
+    </td>
+  </tr>
+</table>
+
+</body>
+</html>`;
+
+  // Validate htmlContent content & length before sending
+  if (!htmlContent || htmlContent.trim().length < 200 || htmlContent.trim() === 'Test' || htmlContent.includes('<h1>Test</h1>')) {
+    console.error('[Test Updated Email] CRITICAL ERROR: htmlContent is missing or is an invalid placeholder!');
+    throw new Error('Test Updated email HTML content is missing or invalid placeholder.');
+  }
+
+  // Log safe debugging metadata
+  console.log(`[Test Updated Email] HTML generated: YES | HTML length: ${htmlContent.length} | Recipient: ${cleanEmail} | Content ready: YES`);
 
   const payload = {
     sender: { name: senderName, email: senderEmail },
-    to: [{ email: recipientEmail, name }],
-    subject: `AptiGuard – Test Updated: ${testTitle}`,
+    to: [{ email: cleanEmail, name: studentName }],
+    subject: `AptiGuard | Assessment Updated — ${testName}`,
     htmlContent,
   };
-
-  console.log(`[Test Update Email] Preparing email for: ${recipientEmail}`);
-  console.log(`[Test Update Email] Sending Brevo email...`);
 
   try {
     const response = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -297,19 +409,18 @@ export const sendTestUpdateEmail = async ({
     });
 
     const data: any = await response.json().catch(() => ({}));
-    console.log(`[Test Update Email] Brevo response: ${response.status} ${response.statusText}`);
 
     if (!response.ok) {
       const errorMsg = data?.message || data?.code || `HTTP ${response.status}`;
-      console.error(`[Test Update Email] Failed to send email to ${recipientEmail}: ${errorMsg}`);
+      console.error(`[Test Updated Email] Recipient: ${cleanEmail} | Status: FAILED (${errorMsg})`);
       return { success: false, message: errorMsg };
     }
 
-    console.log(`[Test Update Email] Email sent successfully to: ${recipientEmail} (Message ID: ${data?.messageId || 'N/A'})`);
+    console.log(`[Test Updated Email] Recipient: ${cleanEmail} | Status: SUCCESS (${response.status} Created) | Message ID: ${data?.messageId || 'N/A'}`);
     return { success: true };
   } catch (error: any) {
     const safeError = error?.message || 'Network error communicating with Brevo.';
-    console.error(`[Test Update Email] Failed: ${safeError}`);
+    console.error(`[Test Updated Email] Recipient: ${cleanEmail} | Status: FAILED (${safeError})`);
     return { success: false, message: safeError };
   }
 };
