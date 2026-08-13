@@ -20,24 +20,46 @@ if (admin.apps.length === 0) {
       path.resolve(__dirname, '../config/firebase.json'),
     ].filter(Boolean) as string[];
 
+    let serviceAccount: any = null;
     let serviceAccountPath: string | null = null;
-    for (const p of candidatePaths) {
-      if (fs.existsSync(p)) {
-        serviceAccountPath = p;
-        break;
+
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      try {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      } catch (e: any) {
+        console.error('[firebase-admin] Failed to parse FIREBASE_SERVICE_ACCOUNT env variable:', e?.message || e);
       }
     }
 
-    if (serviceAccountPath) {
-      const serviceAccountRaw = fs.readFileSync(serviceAccountPath, 'utf8');
-      const serviceAccount = JSON.parse(serviceAccountRaw);
+    if (!serviceAccount) {
+      for (const p of candidatePaths) {
+        if (fs.existsSync(p)) {
+          serviceAccountPath = p;
+          break;
+        }
+      }
 
+      if (serviceAccountPath) {
+        try {
+          const serviceAccountRaw = fs.readFileSync(serviceAccountPath, 'utf8');
+          serviceAccount = JSON.parse(serviceAccountRaw);
+        } catch (e: any) {
+          console.error(`[firebase-admin] Failed to read or parse service account file at ${serviceAccountPath}:`, e?.message || e);
+        }
+      }
+    }
+
+    if (serviceAccount) {
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         projectId: serviceAccount.project_id || projectId,
       });
 
-      console.log(`[firebase-admin] Firebase Admin initialized successfully using service account: ${path.relative(process.cwd(), serviceAccountPath)}`);
+      if (serviceAccountPath) {
+        console.log(`[firebase-admin] Firebase Admin initialized successfully using service account file: ${path.relative(process.cwd(), serviceAccountPath)}`);
+      } else {
+        console.log(`[firebase-admin] Firebase Admin initialized successfully using FIREBASE_SERVICE_ACCOUNT environment variable.`);
+      }
       console.log(`[firebase-admin] Firestore initialized successfully for project: ${serviceAccount.project_id || projectId}`);
     } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
       admin.initializeApp({
