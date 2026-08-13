@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { adminAuth } from '../config/firebase';
+import { adminAuth, adminDb } from '../config/firebase';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -24,9 +24,22 @@ export const requireAuth = async (req: AuthRequest, res: Response, next: NextFun
   const token = authHeader.split('Bearer ')[1];
   try {
     const decodedToken = await adminAuth.verifyIdToken(token);
-    // Determine role (admin shortcut vs normal checks)
-    const email = decodedToken.email || '';
-    const role = email.toLowerCase() === 'nandeeshmn12@gmail.com' ? 'admin' : 'student';
+    const email = (decodedToken.email || '').toLowerCase().trim();
+    let role: 'admin' | 'student' = (email === 'nandeeshmn12@gmail.com' || (decodedToken as any).role === 'admin' || (decodedToken as any).admin === true) ? 'admin' : 'student';
+
+    if (role !== 'admin' && adminDb) {
+      try {
+        const uSnap = await adminDb.collection('users').doc(decodedToken.uid).get();
+        if (uSnap.exists) {
+          const uData = uSnap.data() || {};
+          if (uData.role === 'admin' || uData.isAdmin === true || (uData.email && uData.email.toLowerCase() === 'nandeeshmn12@gmail.com')) {
+            role = 'admin';
+          }
+        }
+      } catch (err) {
+        // Fallback silently if user doc query fails
+      }
+    }
 
     req.user = {
       uid: decodedToken.uid,
