@@ -121,6 +121,14 @@ export const AvailableTestsView: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const handleClearDataEvent = () => {
+      setUserAttemptsMap(new Map());
+    };
+    window.addEventListener('aptiguard:clear-data', handleClearDataEvent);
+    return () => window.removeEventListener('aptiguard:clear-data', handleClearDataEvent);
+  }, []);
+
+  useEffect(() => {
     if (!currentUser) return;
     setLoading(true);
 
