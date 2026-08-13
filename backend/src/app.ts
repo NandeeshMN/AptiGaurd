@@ -20,9 +20,22 @@ if (!brevoKey || !brevoSenderEmail || !brevoSenderName) {
   console.log('✅ Brevo configuration validated successfully.');
 }
 
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://apti-gaurd.vercel.app',
+  process.env.CLIENT_URL,
+  process.env.FRONTEND_URL
+].filter(Boolean) as string[];
+
 // Middlewares
 app.use(cors({
-  origin: process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
 }));
 app.use(express.json());
