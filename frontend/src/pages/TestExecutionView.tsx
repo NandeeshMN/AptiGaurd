@@ -11,6 +11,8 @@ import {
   query,
   where,
   serverTimestamp,
+  deleteDoc,
+  deleteField,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
@@ -406,23 +408,42 @@ export const TestExecutionView: React.FC = () => {
     if (viewMode !== 'active' || !questions[currentIndex]) return;
 
     const qId = questions[currentIndex].id;
+    const isCurrentlySelected = answers[qId] === optionKey;
 
     // Instant local state update (< 1ms)
-    setAnswers((prev) => ({ ...prev, [qId]: optionKey }));
+    setAnswers((prev) => {
+      const nextAnswers = { ...prev };
+      if (isCurrentlySelected) {
+        delete nextAnswers[qId];
+      } else {
+        nextAnswers[qId] = optionKey;
+      }
+      return nextAnswers;
+    });
 
     // Non-blocking background persistence to both subcollection and attempt root doc
     if (attemptId) {
       const answerDocRef = doc(db, 'testAttempts', attemptId, 'answers', qId);
-      setDoc(answerDocRef, {
-        questionId: qId,
-        selectedOption: optionKey,
-        answeredAt: serverTimestamp(),
-      }).catch((err) => console.warn('[AutoSaveAnswer] Subcollection write notice:', err));
+      const attemptRootRef = doc(db, 'testAttempts', attemptId);
+      
+      if (isCurrentlySelected) {
+        deleteDoc(answerDocRef).catch((err) => console.warn('[AutoSaveAnswer] Subcollection delete notice:', err));
+        updateDoc(attemptRootRef, {
+          [`answers.${qId}`]: deleteField(),
+          currentQuestion: currentIndex,
+        }).catch((err) => console.warn('[AutoSaveAnswer] Root doc delete notice:', err));
+      } else {
+        setDoc(answerDocRef, {
+          questionId: qId,
+          selectedOption: optionKey,
+          answeredAt: serverTimestamp(),
+        }).catch((err) => console.warn('[AutoSaveAnswer] Subcollection write notice:', err));
 
-      updateDoc(doc(db, 'testAttempts', attemptId), {
-        [`answers.${qId}`]: optionKey,
-        currentQuestion: currentIndex,
-      }).catch((err) => console.warn('[AutoSaveAnswer] Root doc write notice:', err));
+        updateDoc(attemptRootRef, {
+          [`answers.${qId}`]: optionKey,
+          currentQuestion: currentIndex,
+        }).catch((err) => console.warn('[AutoSaveAnswer] Root doc write notice:', err));
+      }
     }
   };
 
