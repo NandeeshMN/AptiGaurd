@@ -10,7 +10,7 @@ import { ProfileView } from './ProfileView';
 import { CreateTestView } from './CreateTestView';
 import { Footer } from '../components/Footer';
 import { useActionConfirmation } from '../context/ActionConfirmationContext';
-import { collection, getDocs, doc, getDoc, query, where, onSnapshot, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, query, where, onSnapshot, updateDoc, setDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { formatDateToDDMMYYYY, formatTimeTo12Hour } from '../utils/timeFormat';
 import jsPDF from 'jspdf';
@@ -31,7 +31,8 @@ import {
   Search,
   Download,
   CheckCheck,
-  AlertTriangle
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
 
 export function getAdminTestLifecycleStatus(t: any, nowMs: number = Date.now()): 'scheduled' | 'in_progress' | 'closed' {
@@ -92,9 +93,94 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showClearDataModal, setShowClearDataModal] = useState<boolean>(false);
+  const [isClearingData, setIsClearingData] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>(() => defaultTab || 'dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [nowTimeMs, setNowTimeMs] = useState<number>(Date.now());
+
+  const handleExecuteClearData = async () => {
+    if (isClearingData || !currentUser) return;
+    setIsClearingData(true);
+
+    try {
+      const token = await currentUser.getIdToken();
+      const endpoint = isAdmin
+        ? 'http://localhost:5000/api/tests/clear-data/admin'
+        : 'http://localhost:5000/api/tests/clear-data/student';
+
+      if (token) {
+        try {
+          const res = await fetch(endpoint, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.success) {
+            console.warn('[ClearData] Backend status warning:', data?.message || res.status);
+          }
+        } catch (backendErr: any) {
+          console.warn('[ClearData] Backend deletion API fetch error:', backendErr);
+        }
+      }
+
+      try {
+        if (isAdmin) {
+          const attemptsSnap = await getDocs(collection(db, 'testAttempts'));
+          if (!attemptsSnap.empty) {
+            const batch = writeBatch(db);
+            for (const dSnap of attemptsSnap.docs) {
+              try {
+                const answersSnap = await getDocs(collection(db, 'testAttempts', dSnap.id, 'answers'));
+                answersSnap.forEach(aDoc => batch.delete(aDoc.ref));
+              } catch (aErr) {}
+              batch.delete(dSnap.ref);
+            }
+            await batch.commit();
+          }
+        } else {
+          const qAtt = query(collection(db, 'testAttempts'), where('userId', '==', currentUser.uid));
+          const attemptsSnap = await getDocs(qAtt);
+          if (!attemptsSnap.empty) {
+            const batch = writeBatch(db);
+            for (const dSnap of attemptsSnap.docs) {
+              try {
+                const answersSnap = await getDocs(collection(db, 'testAttempts', dSnap.id, 'answers'));
+                answersSnap.forEach(aDoc => batch.delete(aDoc.ref));
+              } catch (aErr) {}
+              batch.delete(dSnap.ref);
+            }
+            await batch.commit();
+          }
+        }
+      } catch (clientErr) {
+        console.warn('[ClearData] Client SDK direct deletion notice:', clientErr);
+      }
+
+      setShowClearDataModal(false);
+      window.dispatchEvent(new CustomEvent('aptiguard:clear-data'));
+      showConfirmation({ message: 'Data cleared successfully', type: 'success' });
+    } catch (err: any) {
+      console.error('Error clearing data:', err);
+      showConfirmation({ message: err?.message || 'Failed to clear data.', type: 'warning' });
+    } finally {
+      setIsClearingData(false);
+    }
+  };
+
+  // Listen to global clear-data event to immediately purge stale attempt records from memory
+  useEffect(() => {
+    const handleClearDataEvent = () => {
+      setAllAttempts([]);
+      if (isAdmin) {
+        fetchAdminStudents();
+      }
+    };
+    window.addEventListener('aptiguard:clear-data', handleClearDataEvent);
+    return () => window.removeEventListener('aptiguard:clear-data', handleClearDataEvent);
+  }, [isAdmin]);
 
   // Sync activeTab if defaultTab changes (e.g. via direct URL navigation)
   useEffect(() => {
@@ -270,7 +356,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
         description: editDescription,
         category: editCategory,
         difficulty: editDifficulty,
-        duration: derivedDurationMins, // Derived automatically from scheduled start & end datetime
+        duration: derivedDurationMins,
         enableNegative: editEnableNegative,
         negativeMarks: editEnableNegative ? (parseFloat(editNegativeMarks) || 0) : 0,
         startDate: editStartDate,
@@ -278,31 +364,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
         endDate: editEndDate,
         endTime: editEndTime,
         status: editStatus,
+        assignmentType: editingTest.assignmentType || 'all',
+        selectedStudentUids: editingTest.selectedStudentUids || [],
         updatedAt: serverTimestamp(),
       };
 
-      // 1. Update Firestore directly (Fast & 100% Guaranteed)
+      // 1. Call backend UPDATE API first for authoritative server validation & email trigger
+      let backendFailed = false;
+      if (token) {
+        try {
+          const res = await fetch(`http://localhost:5000/api/tests/${editingTest.id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            if (res.status === 403) {
+              setUiAlertMsg(data.message || 'Test has already started and can no longer be edited.');
+              backendFailed = true;
+              return;
+            }
+          }
+        } catch (apiErr) {
+          console.warn('[UpdateTest] Backend update API warning:', apiErr);
+        }
+      }
+
+      if (backendFailed) return;
+
+      // 2. Direct client-side Firestore sync fallback/reinforcement
       const testRef = doc(db, 'tests', editingTest.id);
       await updateDoc(testRef, payload).catch(async () => {
         await setDoc(testRef, payload, { merge: true });
       });
-
-      // 2. Trigger backend update route asynchronously for email notifications and backend validation check
-      if (token) {
-        fetch(`http://localhost:5000/api/tests/${editingTest.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(payload)
-        }).then(async (res) => {
-          if (res && res.status === 403) {
-            const data = await res.json().catch(() => ({}));
-            setUiAlertMsg(data.message || 'Test has already started and can no longer be edited.');
-          }
-        }).catch((apiErr) => console.warn('[UpdateTest] Background notification error:', apiErr));
-      }
 
       // 3. Close modal & show confirmation card immediately
       setEditingTest(null);
@@ -1069,6 +1167,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                       </div>
                     </div>
 
+                    {/* Clear Data Action Card */}
+                    <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs space-y-3">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center border border-red-100 flex-shrink-0">
+                          <Trash2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-900">Clear Data</h4>
+                          <p className="text-[10px] text-slate-500 font-medium">Delete candidate submissions &amp; attempt logs</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowClearDataModal(true)}
+                        className="w-full py-2 bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-bold rounded-lg uppercase tracking-wider transition-colors border border-red-200 focus:outline-none cursor-pointer"
+                      >
+                        Clear Data
+                      </button>
+                    </div>
+
                   </div>
 
                 </div>
@@ -1519,6 +1637,55 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
           </div>
         )}
 
+        {/* Clear Data Confirmation Card Modal (Admin) */}
+        {showClearDataModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
+            <div className="bg-white w-full max-w-md rounded-2xl border border-slate-200/80 p-6 shadow-xl space-y-5 text-left">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center border border-amber-200 flex-shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">⚠ Clear Data</h3>
+                  <p className="text-xs text-slate-500 font-medium">Are you sure you want to delete this data?</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 bg-slate-50 border border-slate-200/70 rounded-xl p-4 text-xs text-slate-600 font-medium leading-relaxed">
+                <p className="font-bold text-slate-900">This action cannot be undone.</p>
+                <p>This action will permanently delete:</p>
+                <ul className="list-disc list-inside space-y-1 text-slate-700">
+                  <li>Candidate test attempts &amp; submission history</li>
+                  <li>Submitted answer keys &amp; proctoring violation logs</li>
+                  <li>Student score cards &amp; evaluation result records</li>
+                </ul>
+                <p className="pt-1 text-[11px] text-slate-500 italic">
+                  Note: Global assessments, questions, and registered user accounts will remain safe.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  type="button"
+                  disabled={isClearingData}
+                  onClick={() => setShowClearDataModal(false)}
+                  className="flex-1 py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg uppercase tracking-wide focus:outline-none transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isClearingData}
+                  onClick={handleExecuteClearData}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xs font-bold rounded-lg uppercase tracking-wide focus:outline-none transition-colors cursor-pointer shadow-xs disabled:opacity-75"
+                >
+                  {isClearingData ? 'Deleting...' : 'Delete Permanently'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     );
   }
@@ -1757,8 +1924,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
           {/* Dynamic Subview Router */}
           {activeTab === 'dashboard' ? (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Left Column widgets (Stretched to col-span-3) */}
-              <div className="lg:col-span-3 space-y-6">
+              {/* Left Column widgets */}
+              <div className="lg:col-span-2 space-y-6">
 
                 {loadingStudentTests ? (
                   <div className="bg-white rounded-xl border border-slate-200/80 p-8 text-center text-slate-400 text-xs font-semibold shadow-xs">
@@ -1792,7 +1959,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                                 No upcoming assessments.
                               </div>
                             ) : (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 {upcomingList.map((test) => (
                                   <div key={test.id} className="bg-white rounded-xl border border-t-4 border-slate-200/80 border-t-amber-500 shadow-xs hover:shadow-md transition-all duration-200 p-4 flex flex-col gap-3">
                                     <div className="flex items-start justify-between gap-2">
@@ -1824,7 +1991,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                           <div className="space-y-3">
                             <div className="flex items-center justify-between">
                               <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Available Tests</h3>
-                              <button className="text-xs font-bold text-[#0952cc] hover:underline" onClick={() => setActiveTab('available')}>View All &rarr;</button>
+                              <button className="text-xs font-bold text-[#0952cc] hover:underline cursor-pointer" onClick={() => setActiveTab('available')}>View All &rarr;</button>
                             </div>
 
                             {availableList.length === 0 ? (
@@ -1832,7 +1999,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                                 No tests available right now.
                               </div>
                             ) : (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 {availableList.map((test) => (
                                   <div key={test.id} className="bg-white rounded-xl border border-t-4 border-slate-200/80 border-t-[#0952cc] shadow-xs hover:shadow-md transition-all duration-200 p-4 flex flex-col gap-3">
                                     <div className="flex items-start justify-between gap-2">
@@ -1868,7 +2035,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                                 No completed assessments yet.
                               </div>
                             ) : (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 {completedList.map((test) => (
                                   <div key={test.id} className="bg-white rounded-xl border border-t-4 border-slate-200/80 border-t-slate-400 shadow-xs hover:shadow-md transition-all duration-200 p-4 flex flex-col gap-3 opacity-80">
                                     <div className="flex items-start justify-between gap-2">
@@ -1903,8 +2070,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
               </div>
 
               {/* Right Column widgets */}
-              <div className="hidden lg:block space-y-6">
-                {/* Sidebar widgets removed for data-driven cleanliness */}
+              <div className="space-y-6">
+                {/* Recent Activity card */}
+                <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs space-y-4">
+                  <h4 className="text-xs font-extrabold text-[#031b4e] uppercase tracking-wide">Recent Activity</h4>
+                  <div className="text-center text-slate-400 py-6 text-xs font-semibold">
+                    No recent activity.
+                  </div>
+                </div>
+
+                {/* Clear Data Action Card */}
+                <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs space-y-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center border border-red-100 flex-shrink-0">
+                      <Trash2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900">Clear Data</h4>
+                      <p className="text-[10px] text-slate-500 font-medium">Delete your personal attempt history</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowClearDataModal(true)}
+                    className="w-full py-2 bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-bold rounded-lg uppercase tracking-wider transition-colors border border-red-200 focus:outline-none cursor-pointer"
+                  >
+                    Clear Data
+                  </button>
+                </div>
               </div>
 
             </div>
@@ -1957,6 +2150,67 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                 className="flex-1 py-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xs font-bold rounded-lg uppercase tracking-wide focus:outline-none transition-colors"
               >
                 {isLoggingOut ? 'Logging out...' : 'Logout'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear Data Confirmation Card Modal */}
+      {showClearDataModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
+          <div className="bg-white w-full max-w-md rounded-2xl border border-slate-200/80 p-6 shadow-xl space-y-5 text-left">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center border border-amber-200 flex-shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">⚠ Clear Data</h3>
+                <p className="text-xs text-slate-500 font-medium">
+                  {isAdmin ? 'Are you sure you want to delete this data?' : 'Are you sure you want to delete your data?'}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 bg-slate-50 border border-slate-200/70 rounded-xl p-4 text-xs text-slate-600 font-medium leading-relaxed">
+              <p className="font-bold text-slate-900">This action cannot be undone.</p>
+              <p>This action will permanently delete:</p>
+              {isAdmin ? (
+                <ul className="list-disc list-inside space-y-1 text-slate-700">
+                  <li>Candidate test attempts &amp; submission history</li>
+                  <li>Submitted answer keys &amp; proctoring violation logs</li>
+                  <li>Student score cards &amp; evaluation result records</li>
+                </ul>
+              ) : (
+                <ul className="list-disc list-inside space-y-1 text-slate-700">
+                  <li>Your personal assessment attempt history</li>
+                  <li>Your submitted test answers and violation logs</li>
+                  <li>Your score cards and result records</li>
+                </ul>
+              )}
+              <p className="pt-1 text-[11px] text-slate-500 italic">
+                {isAdmin
+                  ? 'Note: Global assessments, questions, and registered user accounts will remain safe.'
+                  : 'Note: Global assessments, questions, and your login account will remain safe.'}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                type="button"
+                disabled={isClearingData}
+                onClick={() => setShowClearDataModal(false)}
+                className="flex-1 py-2.5 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg uppercase tracking-wide focus:outline-none transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isClearingData}
+                onClick={handleExecuteClearData}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xs font-bold rounded-lg uppercase tracking-wide focus:outline-none transition-colors cursor-pointer shadow-xs disabled:opacity-75"
+              >
+                {isClearingData ? 'Deleting...' : (isAdmin ? 'Delete Permanently' : 'Delete Data')}
               </button>
             </div>
           </div>
