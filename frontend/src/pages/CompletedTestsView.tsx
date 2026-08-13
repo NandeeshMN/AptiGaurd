@@ -17,6 +17,14 @@ export const CompletedTestsView: React.FC = () => {
 
 
   useEffect(() => {
+    const handleClearDataEvent = () => {
+      setCompletedItems([]);
+    };
+    window.addEventListener('aptiguard:clear-data', handleClearDataEvent);
+    return () => window.removeEventListener('aptiguard:clear-data', handleClearDataEvent);
+  }, []);
+
+  useEffect(() => {
     if (!currentUser) return;
     setLoading(true);
 
