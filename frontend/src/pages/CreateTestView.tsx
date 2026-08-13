@@ -1882,7 +1882,7 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
                     // Trigger backend publish route asynchronously in background (non-blocking)
                     currentUser?.getIdToken().then((idToken) => {
                       if (idToken) {
-                        fetch(`\${import.meta.env.VITE_API_URL}/api/tests/${testId}/publish`, {
+                        fetch(`${import.meta.env.VITE_API_URL}/api/tests/${testId}/publish`, {
                           method: 'PATCH',
                           headers: {
                             'Authorization': `Bearer ${idToken}`

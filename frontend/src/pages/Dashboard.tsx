@@ -101,8 +101,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     try {
       const token = await currentUser.getIdToken();
       const endpoint = isAdmin
-        ? `\${import.meta.env.VITE_API_URL}/api/tests/clear-data/admin`
-        : `\${import.meta.env.VITE_API_URL}/api/tests/clear-data/student`;
+        ? `${import.meta.env.VITE_API_URL}/api/tests/clear-data/admin`
+        : `${import.meta.env.VITE_API_URL}/api/tests/clear-data/student`;
 
       if (token) {
         try {
@@ -364,7 +364,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
       let backendFailed = false;
       if (token) {
         try {
-          const res = await fetch(`\${import.meta.env.VITE_API_URL}/api/tests/${editingTest.id}`, {
+          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/tests/${editingTest.id}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',

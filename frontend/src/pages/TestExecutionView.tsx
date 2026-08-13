@@ -280,7 +280,7 @@ export const TestExecutionView: React.FC = () => {
       const idToken = await currentUser.getIdToken();
       let startRes: any = null;
       try {
-        const res = await fetch(`\${import.meta.env.VITE_API_URL}/api/tests/${testId}/start`, {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/tests/${testId}/start`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -597,7 +597,7 @@ export const TestExecutionView: React.FC = () => {
       const idToken = await currentUser?.getIdToken();
       if (idToken) {
         try {
-          const res = await fetch(`\${import.meta.env.VITE_API_URL}/api/tests/attempts/${attId}/submit`, {
+          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/tests/attempts/${attId}/submit`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
