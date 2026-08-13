@@ -91,8 +91,7 @@ const triggerTestUpdateEmailsAsync = (testId: string, testTitle: string, changed
     try {
       if (!adminDb) return;
 
-      console.log(`[Test Update] Test updated successfully: ${testId}`);
-      console.log(`[Test Update Email] Finding eligible students for test: ${testId}`);
+      console.log(`[Test Update]\nTest updated successfully: ${testId}`);
 
       const testDocRef = adminDb.collection('tests').doc(testId);
       const testSnap = await testDocRef.get();
@@ -105,46 +104,59 @@ const triggerTestUpdateEmailsAsync = (testId: string, testTitle: string, changed
         const usersSnap = await adminDb.collection('users').get();
         usersSnap.forEach((uDoc) => {
           const u = uDoc.data();
-          if (u.email && u.role !== 'admin') {
-            const rawEmail = String(u.email).trim().toLowerCase();
-            const resolvedName = u.name || u.fullName || u.displayName || rawEmail.split('@')[0];
-            recipientsMap.set(rawEmail, { email: rawEmail, name: resolvedName });
+          const rawEmail = u.email ? String(u.email).trim().toLowerCase() : '';
+          const role = (u.role || '').toLowerCase();
+
+          if (rawEmail && role !== 'admin' && rawEmail !== 'nandeeshmn12@gmail.com') {
+            let rawName = u.name || u.fullName || u.displayName || '';
+            if (!rawName || rawName.includes('@')) {
+              const prefix = rawEmail.split('@')[0];
+              rawName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+            }
+            recipientsMap.set(rawEmail, { email: rawEmail, name: rawName });
           }
         });
       } else {
-        const assignedSnap = await testDocRef.collection('assignedStudents').get();
-        for (const aDoc of assignedSnap.docs) {
+        const assignedUids = new Set<string>(
+          Array.isArray(currentData.selectedStudentUids) ? currentData.selectedStudentUids : []
+        );
+
+        const assignedSubSnap = await testDocRef.collection('assignedStudents').get();
+        assignedSubSnap.forEach((aDoc) => {
           const aData = aDoc.data();
-          const studentUid = aData.uid || aDoc.id;
+          const uid = aData.uid || aDoc.id;
+          if (uid) assignedUids.add(uid);
+        });
 
-          let email = aData.email ? String(aData.email).trim().toLowerCase() : '';
-          let resolvedName = aData.fullName || aData.name || '';
-
-          const uSnap = await adminDb.collection('users').doc(studentUid).get();
+        for (const uid of Array.from(assignedUids)) {
+          const uSnap = await adminDb.collection('users').doc(uid).get();
           if (uSnap.exists) {
             const u = uSnap.data() || {};
-            if (u.email) {
-              email = String(u.email).trim().toLowerCase();
+            const rawEmail = u.email ? String(u.email).trim().toLowerCase() : '';
+            if (rawEmail) {
+              let rawName = u.name || u.fullName || u.displayName || '';
+              if (!rawName || rawName.includes('@')) {
+                const prefix = rawEmail.split('@')[0];
+                rawName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+              }
+              recipientsMap.set(rawEmail, { email: rawEmail, name: rawName });
             }
-            resolvedName = u.name || u.fullName || u.displayName || resolvedName || email.split('@')[0];
-          }
-
-          if (email) {
-            recipientsMap.set(email, { email, name: resolvedName || email.split('@')[0] });
           }
         }
       }
 
       const recipients = Array.from(recipientsMap.values());
-      console.log(`[Test Update Email] Eligible students found: ${recipients.length}`);
+      console.log(`[Test Update Email]\nEligible recipients: ${recipients.length}`);
 
       if (recipients.length > 0) {
+        console.log(`[Test Update Email]\nDispatch started`);
+
         const effectiveChanges = changedDetails && changedDetails.length > 0
           ? changedDetails
-          : ['Assessment configuration and schedule parameters updated'];
+          : ['Assessment configuration or schedule has been updated.'];
 
         const batchStats = await sendBatchTestUpdateEmails(recipients, {
-          testTitle: testTitle || 'Assessment',
+          testTitle: testTitle || currentData.title || 'Assessment',
           changedDetails: effectiveChanges,
           startDate: currentData.startDate,
           startTime: currentData.startTime,
@@ -153,12 +165,12 @@ const triggerTestUpdateEmailsAsync = (testId: string, testTitle: string, changed
           duration: currentData.duration,
         });
 
-        console.log(`[Test Update Email] Batch dispatch completed: ${batchStats.sentCount} sent successfully, ${batchStats.failedCount} failed.`);
+        console.log(`[Test Update Email]\nCompleted: ${batchStats.sentCount}\nFailed: ${batchStats.failedCount}`);
       } else {
-        console.log(`[Test Update Email] No eligible students found for email notification.`);
+        console.log(`[Test Update Email]\nNotice: No eligible recipients found for test ${testId}`);
       }
     } catch (err: any) {
-      console.error(`[Test Update Email] Failed: ${err?.message || err}`);
+      console.error(`[Test Update Email] Dispatch error:`, err?.message || err);
     }
   });
 };
@@ -674,6 +686,79 @@ router.get('/attempts/:attemptId', requireAuth, async (req: AuthRequest, res: Re
   } catch (error: any) {
     console.error('Fetch attempt error:', error);
     res.status(500).json({ success: false, message: 'Failed to retrieve attempt.' });
+  }
+});
+
+// DELETE /api/tests/clear-data/student -> Deletes authenticated student's attempt history & answers
+router.delete('/clear-data/student', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!requireDb(res)) return;
+  const userId = req.user?.uid;
+
+  if (!userId) {
+    res.status(401).json({ success: false, message: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    const attemptsSnap = await adminDb!.collection('testAttempts').where('userId', '==', userId).get();
+    if (attemptsSnap.empty) {
+      res.json({ success: true, message: 'Data cleared successfully', deletedCount: 0 });
+      return;
+    }
+
+    const deletePromises = attemptsSnap.docs.map(async (docSnap) => {
+      try {
+        const answersSnap = await docSnap.ref.collection('answers').get();
+        const batch = adminDb!.batch();
+        answersSnap.forEach(aDoc => batch.delete(aDoc.ref));
+        batch.delete(docSnap.ref);
+        await batch.commit();
+      } catch (err) {
+        await docSnap.ref.delete().catch(() => {});
+      }
+    });
+
+    await Promise.all(deletePromises);
+
+    console.log(`[Clear Data] Student assessment data cleared for UID: ${userId} (${attemptsSnap.docs.length} attempts deleted)`);
+    res.json({ success: true, message: 'Data cleared successfully' });
+  } catch (error: any) {
+    console.error('Clear student data error:', error);
+    res.status(500).json({ success: false, message: 'Failed to clear student assessment data.' });
+  }
+});
+
+// DELETE /api/tests/clear-data/admin -> Deletes all candidate attempts & submission records
+router.delete('/clear-data/admin', requireAuth, requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!requireDb(res)) return;
+
+  try {
+    const attemptsSnap = await adminDb!.collection('testAttempts').get();
+    if (attemptsSnap.empty) {
+      res.json({ success: true, message: 'Data cleared successfully', deletedCount: 0 });
+      return;
+    }
+
+    const deletePromises = attemptsSnap.docs.map(async (docSnap) => {
+      try {
+        const answersSnap = await docSnap.ref.collection('answers').get();
+        const batch = adminDb!.batch();
+        answersSnap.forEach(aDoc => batch.delete(aDoc.ref));
+        batch.delete(docSnap.ref);
+        await batch.commit();
+      } catch (err) {
+        console.warn(`[Clear Data Admin] Single attempt delete error on ${docSnap.id}:`, err);
+        await docSnap.ref.delete().catch(() => {});
+      }
+    });
+
+    await Promise.all(deletePromises);
+
+    console.log(`[Clear Data] All candidate test attempts (${attemptsSnap.docs.length}) cleared by Admin: ${req.user?.uid}`);
+    res.json({ success: true, message: 'Data cleared successfully', deletedCount: attemptsSnap.docs.length });
+  } catch (error: any) {
+    console.error('Clear admin data error:', error);
+    res.status(500).json({ success: false, message: 'Failed to clear candidate assessment data.' });
   }
 });
 
