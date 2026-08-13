@@ -91,6 +91,15 @@ export const AdminResultsView: React.FC = () => {
     };
   }, []);
 
+  // Listen to global clear-data event to immediately purge stale attempt records from memory
+  useEffect(() => {
+    const handleClearDataEvent = () => {
+      setAttempts([]);
+    };
+    window.addEventListener('aptiguard:clear-data', handleClearDataEvent);
+    return () => window.removeEventListener('aptiguard:clear-data', handleClearDataEvent);
+  }, []);
+
   // Helper to format date header into strict DD/MM/YYYY format
   const formatDateHeader = (dateObj: Date): string => {
     return formatDateToDDMMYYYY(dateObj);
@@ -410,7 +419,12 @@ export const AdminResultsView: React.FC = () => {
   });
 
   // Filter processed tests by search query & date filter
+  // Only show tests that have at least one candidate submission — tests with 0 participants
+  // have no result records (e.g. after Clear Data) and must not appear as empty cards.
   const filteredTests = processedTests.filter((item) => {
+    // Must have at least one candidate attempt
+    if (item.participantsCount === 0) return false;
+
     // Search query match
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch = !q ||
