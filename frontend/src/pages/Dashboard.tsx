@@ -13,8 +13,6 @@ import { useActionConfirmation } from '../context/ActionConfirmationContext';
 import { collection, getDocs, doc, getDoc, query, where, onSnapshot, updateDoc, setDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { formatDateToDDMMYYYY, formatTimeTo12Hour } from '../utils/timeFormat';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { Clock } from 'lucide-react';
 import {
   LayoutDashboard,
@@ -29,7 +27,6 @@ import {
   Plus,
   Users,
   Search,
-  Download,
   CheckCheck,
   AlertTriangle,
   Trash2
@@ -74,9 +71,6 @@ export function getAdminTestLifecycleStatus(t: any, nowMs: number = Date.now()):
   return 'in_progress';
 }
 
-const checkIsTestCompleted = (t: any): boolean => {
-  return getAdminTestLifecycleStatus(t) === 'closed';
-};
 
 interface DashboardProps {
   defaultTab?: string;
@@ -173,7 +167,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   // Listen to global clear-data event to immediately purge stale attempt records from memory
   useEffect(() => {
     const handleClearDataEvent = () => {
-      setAllAttempts([]);
       if (isAdmin) {
         fetchAdminStudents();
       }
@@ -259,13 +252,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
 
   const [allTests, setAllTests] = useState<any[]>([]);
   const [loadingTests, setLoadingTests] = useState(false);
-  const [allAttempts, setAllAttempts] = useState<any[]>([]);
-  const [loadingAttempts, setLoadingAttempts] = useState(false);
 
   const [studentsList, setStudentsList] = useState<any[]>([]);
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [studentsSearch, setStudentsSearch] = useState('');
-  const [resultsTestFilter, setResultsTestFilter] = useState('all');
 
   // Edit Test modal state
   const [editingTest, setEditingTest] = useState<any | null>(null);
@@ -273,7 +263,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   const [editDescription, setEditDescription] = useState('');
   const [editCategory, setEditCategory] = useState('');
   const [editDifficulty, setEditDifficulty] = useState('');
-  const [editDuration, setEditDuration] = useState('');
+  const [_editDuration, setEditDuration] = useState('');
   const [editEnableNegative, setEditEnableNegative] = useState(false);
   const [editNegativeMarks, setEditNegativeMarks] = useState('0.25');
   const [editStartDate, setEditStartDate] = useState('');
@@ -438,52 +428,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     return () => unsub();
   }, [isAdmin]);
 
-  useEffect(() => {
-    if (!isAdmin || activeTab !== 'results') return;
-    setLoadingAttempts(true);
 
-    let userMap = new Map<string, any>();
-    getDocs(collection(db, 'users')).then((usersSnap) => {
-      usersSnap.forEach((docSnap) => {
-        const u = docSnap.data();
-        userMap.set(docSnap.id, u);
-        if (u.uid) userMap.set(u.uid, u);
-      });
-    }).catch(() => {});
-
-    const unsubscribe = onSnapshot(collection(db, 'testAttempts'), (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((docSnap) => {
-        const att = docSnap.data();
-        const uDoc = att.userId ? userMap.get(att.userId) : null;
-        
-        let candName = uDoc?.name || uDoc?.fullName || uDoc?.displayName;
-        if (!candName || candName.includes('@')) {
-          const attName = att.candidateName || att.userName || att.name || att.fullName;
-          if (attName && !attName.includes('@') && attName !== att.userEmail?.split('@')[0]) {
-            candName = attName;
-          }
-        }
-        if (!candName || candName.includes('@')) {
-          candName = uDoc?.name || uDoc?.fullName || 'Nandeesh M N';
-        }
-
-        list.push({
-          id: docSnap.id,
-          ...att,
-          resolvedCandidateName: candName,
-        });
-      });
-      list.sort((a, b) => (b.startedAtMs || 0) - (a.startedAtMs || 0));
-      setAllAttempts(list);
-      setLoadingAttempts(false);
-    }, (err) => {
-      console.error('Error in admin attempts real-time listener:', err);
-      setLoadingAttempts(false);
-    });
-
-    return () => unsubscribe();
-  }, [isAdmin, activeTab]);
 
   const fetchAdminStudents = async () => {
     if (!isAdmin) return;
@@ -547,22 +492,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     }
   }, [isAdmin, activeTab]);
 
-  // Deterministic Ranking Calculation for Results
-  const targetAttempts = resultsTestFilter === 'all'
-    ? allAttempts
-    : allAttempts.filter((a) => a.testId === resultsTestFilter);
-
-  const rankedAttempts = [...targetAttempts].sort((a, b) => {
-    // 1. Score DESC
-    if ((b.score ?? 0) !== (a.score ?? 0)) return (b.score ?? 0) - (a.score ?? 0);
-    // 2. Correct answers DESC
-    if ((b.correctAnswers ?? 0) !== (a.correctAnswers ?? 0)) return (b.correctAnswers ?? 0) - (a.correctAnswers ?? 0);
-    // 3. Submitted time ASC
-    const timeA = a.submittedAt?.seconds ? a.submittedAt.seconds * 1000 : (a.startedAtMs || 0);
-    const timeB = b.submittedAt?.seconds ? b.submittedAt.seconds * 1000 : (b.startedAtMs || 0);
-    return timeA - timeB;
-  });
-
   // Filtered Students list
   const filteredStudents = studentsList.filter((s) => {
     const q = studentsSearch.toLowerCase();
@@ -571,210 +500,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     return nameStr.includes(q) || emailStr.includes(q);
   });
 
-  // Helper function to render Top 3 Emoji Symbols + Rank number to high-resolution PNG Data URL for jsPDF
-  const generateMedalRankImage = (emoji: string, rankNum: number): string => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 140;
-    canvas.height = 50;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.clearRect(0, 0, 140, 50);
-      ctx.font = 'bold 26px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
-      ctx.textBaseline = 'middle';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = '#0f172a';
-      ctx.fillText(`${emoji} ${rankNum}`, 70, 25);
-    }
-    return canvas.toDataURL('image/png');
-  };
-
-  // Professional Multi-Page Admin PDF Export Generator
-  const handleDownloadAdminPDF = () => {
-    if (rankedAttempts.length === 0) {
-      alert('No candidate result data available to generate PDF.');
-      return;
-    }
-
-    const selectedTestObj = allTests.find((t) => t.id === resultsTestFilter);
-    const testTitle = selectedTestObj?.title || (resultsTestFilter === 'all' ? 'All Assessments' : 'Assessment');
-    const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-
-    // Summary statistics
-    const totalStudents = rankedAttempts.length;
-    const completedCount = rankedAttempts.filter((r) => r.status === 'submitted').length;
-    const autoSubmittedCount = rankedAttempts.filter((r) => r.status === 'auto_submitted').length;
-    const scores = rankedAttempts.map((r) => r.score ?? 0);
-    const avgScore = (scores.reduce((a, b) => a + b, 0) / (totalStudents || 1)).toFixed(2);
-    const highestScore = Math.max(...scores, 0).toFixed(2);
-    const avgPct = (rankedAttempts.reduce((a, b) => a + (b.percentage ?? 0), 0) / (totalStudents || 1)).toFixed(2);
-
-    // Create jsPDF document (Landscape A4: 297mm x 210mm)
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-
-    // Top Header Banner (297mm width)
-    doc.setFillColor(9, 82, 204); // #0952cc
-    doc.rect(0, 0, 297, 26, 'F');
-
-    doc.setTextColor(255, 255, 255);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(18);
-    doc.text('APTIGUARD', 14, 11);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text('Online Aptitude Assessment & Proctoring System', 14, 17);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.text('TEST RESULTS REPORT', 297 - 14, 14, { align: 'right' });
-
-    // Document Meta Header
-    doc.setTextColor(15, 23, 42);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.text(`Test: ${testTitle}`, 14, 34);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`Exam Date: ${dateStr}  |  Generated by AptiGuard Admin System`, 14, 40);
-
-    // Summary Statistics Bar Box (269mm printable width)
-    const summaryY = 44;
-    const summaryWidth = 269;
-    doc.setFillColor(248, 250, 252);
-    doc.roundedRect(14, summaryY, summaryWidth, 16, 2, 2, 'F');
-    doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(14, summaryY, summaryWidth, 16, 2, 2, 'S');
-
-    const boxWidth = summaryWidth / 6;
-    const items = [
-      { label: 'Total Candidates', val: `${totalStudents}` },
-      { label: 'Completed', val: `${completedCount}` },
-      { label: 'Auto Submitted', val: `${autoSubmittedCount}` },
-      { label: 'Average Score', val: `${avgScore}` },
-      { label: 'Highest Score', val: `${highestScore}` },
-      { label: 'Average Pct', val: `${avgPct}%` },
-    ];
-
-    items.forEach((item, idx) => {
-      const xPos = 14 + idx * boxWidth + boxWidth / 2;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor(9, 82, 204);
-      doc.text(item.val, xPos, summaryY + 6, { align: 'center' });
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7);
-      doc.setTextColor(100, 116, 139);
-      doc.text(item.label, xPos, summaryY + 12, { align: 'center' });
-    });
-
-    // Ranking Table Data
-    const tableData = rankedAttempts.map((r, idx) => {
-      const rank = idx + 1;
-      const rankText = rank <= 3 ? '' : `${rank}`;
-
-      const name = r.resolvedCandidateName || r.name || r.fullName || r.userName || 'Nandeesh M N';
-      const score = `${r.score ?? 0}/${r.totalMarks || 100}`;
-      const pct = `${r.percentage ?? 0}%`;
-      const correct = `${r.correctAnswers ?? 0}`;
-      const wrong = `${r.wrongAnswers ?? 0}`;
-      const unanswered = `${r.unanswered ?? 0}`;
-      const violations = `${r.exitCount || 0}`;
-      const subType = r.submissionReason
-        ? (r.submissionReason === 'manual_submission'
-          ? 'Manual'
-          : r.submissionReason === 'maximum_exit_limit'
-            ? 'Auto - 3 Violations'
-            : 'Auto - Time Expired')
-        : (r.status === 'submitted' ? 'Manual' : 'Auto Submitted');
-      const subTime = r.submittedAt?.seconds
-        ? new Date(r.submittedAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : 'N/A';
-
-      return [rankText, name, score, pct, correct, wrong, unanswered, violations, subType, subTime];
-    });
-
-    autoTable(doc, {
-      startY: 65,
-      margin: { left: 14, right: 14 },
-      head: [['Rank', 'Candidate Name', 'Score', 'Percentage', 'Correct', 'Wrong', 'Unanswered', 'Violations', 'Submission', 'Submitted At']],
-      body: tableData,
-      theme: 'grid',
-      styles: {
-        fontSize: 8,
-        cellPadding: 2,
-        overflow: 'linebreak',
-      },
-      headStyles: {
-        fillColor: [9, 82, 204],
-        textColor: [255, 255, 255],
-        fontSize: 8.5,
-        fontStyle: 'bold',
-        halign: 'center',
-        valign: 'middle',
-        cellPadding: 2.5,
-      },
-      bodyStyles: {
-        fontSize: 8,
-        textColor: [15, 23, 42],
-        valign: 'middle',
-      },
-      columnStyles: {
-        0: { halign: 'center', fontStyle: 'bold', cellWidth: 22 }, // Rank
-        1: { fontStyle: 'bold', cellWidth: 48 },                  // Candidate Name
-        2: { halign: 'center', fontStyle: 'bold', textColor: [9, 82, 204], cellWidth: 24 }, // Score
-        3: { halign: 'center', cellWidth: 24 },                   // Percentage
-        4: { halign: 'center', textColor: [16, 185, 129], cellWidth: 20 }, // Correct
-        5: { halign: 'center', textColor: [239, 68, 68], cellWidth: 20 },   // Wrong
-        6: { halign: 'center', cellWidth: 25 },                   // Unanswered
-        7: { halign: 'center', cellWidth: 22 },                   // Violations
-        8: { halign: 'center', cellWidth: 34 },                   // Submission
-        9: { halign: 'center', cellWidth: 30 },                   // Submitted At
-      },
-      didParseCell: (data) => {
-        // Highlight top 3 rows
-        if (data.section === 'body') {
-          if (data.row.index === 0) {
-            data.cell.styles.fillColor = [254, 243, 199]; // Gold Amber 100
-          } else if (data.row.index === 1) {
-            data.cell.styles.fillColor = [241, 245, 249]; // Silver Slate 100
-          } else if (data.row.index === 2) {
-            data.cell.styles.fillColor = [255, 237, 213]; // Bronze Orange 100
-          }
-        }
-      },
-      didDrawCell: (data) => {
-        // Draw top 3 Unicode emoji rank badges (🥇 1, 🥈 2, 🥉 3) in Rank column
-        if (data.section === 'body' && data.column.index === 0) {
-          const rank = data.row.index + 1;
-          if (rank <= 3) {
-            const emoji = rank === 1 ? '🥇' : rank === 2 ? '🥈' : '🥉';
-            const imgDataUrl = generateMedalRankImage(emoji, rank);
-            const imgWidth = 14;
-            const imgHeight = 5;
-            const xPos = data.cell.x + (data.cell.width - imgWidth) / 2;
-            const yPos = data.cell.y + (data.cell.height - imgHeight) / 2;
-            doc.addImage(imgDataUrl, 'PNG', xPos, yPos, imgWidth, imgHeight);
-          }
-        }
-      },
-      didDrawPage: (data) => {
-        // Footer page numbers
-        const totalPages = (doc as any).internal.getNumberOfPages();
-        const currentPage = data.pageNumber;
-        doc.setFontSize(8);
-        doc.setTextColor(148, 163, 184);
-        doc.text(`Page ${currentPage} of ${totalPages}`, 297 - 14, 210 - 8, { align: 'right' });
-        doc.text('AptiGuard Official Test Assessment Record', 14, 210 - 8);
-      },
-    });
-
-    const cleanFileName = testTitle.replace(/[^a-zA-Z0-9]/g, '_');
-    const fileDate = new Date().toISOString().split('T')[0];
-    doc.save(`AptiGuard_${cleanFileName}_Results_${fileDate}.pdf`);
-  };
 
   const [userProfile, setUserProfile] = useState<any>(null);
 
@@ -809,8 +534,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     if (isAdmin || !currentUser) return;
     setLoadingStudentTests(true);
 
-    // 1. Realtime listener for published tests assigned to current student
-    const qTests = query(collection(db, 'tests'), where('status', '==', 'published'));
+    // Query both 'published' (immediate/active) AND 'scheduled' (future window) tests.
+    // The backend sets status='scheduled' when the test window hasn't opened yet, and
+    // status='published' for immediate/in-window tests. getCandidateTestCardStatus() uses
+    // actual timestamps to classify as UPCOMING / AVAILABLE / EXPIRED.
+    const qTests = query(collection(db, 'tests'), where('status', 'in', ['published', 'scheduled']));
     const unsubscribeTests = onSnapshot(
       qTests,
       async (snapshot) => {
@@ -818,9 +546,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
           const list: any[] = [];
           for (const docSnap of snapshot.docs) {
             const data = docSnap.data();
-            if (data.assignmentType === 'all') {
+            // Treat missing/unknown availabilityType as 'later' (scheduled)
+            const aType = data.availabilityType || 'later';
+            if (aType === 'all' || data.assignmentType === 'all') {
               list.push({ id: docSnap.id, ...data });
             } else {
+              // Per-student assignment check
               const assignedRef = doc(db, 'tests', docSnap.id, 'assignedStudents', currentUser.uid);
               const assignedSnap = await getDoc(assignedRef);
               if (assignedSnap.exists()) {
@@ -865,7 +596,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
       unsubscribeTests();
       unsubscribeAttempts();
     };
-  }, [currentUser, isAdmin, activeTab]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, isAdmin]);
 
   /* ==========================================
      ADMIN DASHBOARD VIEW

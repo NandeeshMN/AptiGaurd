@@ -128,8 +128,9 @@ export const CompletedTestsView: React.FC = () => {
       setLoading(false);
     };
 
-    // 1. Realtime listener for published tests
-    const qTests = query(collection(db, 'tests'), where('status', '==', 'published'));
+    // Query both 'published' AND 'scheduled' status tests — backend sets
+    // status='scheduled' for future-window tests at publish time.
+    const qTests = query(collection(db, 'tests'), where('status', 'in', ['published', 'scheduled']));
     const unsubscribeTests = onSnapshot(
       qTests,
       async (snapshot) => {

@@ -59,7 +59,7 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('Quantitative Aptitude');
   const [difficulty, setDifficulty] = useState('Beginner');
-  const [duration, setDuration] = useState('30');
+  const [duration, _setDuration] = useState('30');
   const [targetQuestions, setTargetQuestions] = useState('30');
   const [targetMarks, setTargetMarks] = useState('100');
   const [passingScore, setPassingScore] = useState('40');

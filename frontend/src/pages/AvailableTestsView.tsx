@@ -132,8 +132,12 @@ export const AvailableTestsView: React.FC = () => {
     if (!currentUser) return;
     setLoading(true);
 
-    // 1. Realtime listener for published tests
-    const qTests = query(collection(db, 'tests'), where('status', '==', 'published'));
+    // Query both 'published' (immediate/active) AND 'scheduled' (future window) tests.
+    // The backend sets status='scheduled' when the test window hasn't opened yet, and
+    // status='published' for immediate tests. getCandidateTestCardStatus() uses the
+    // actual startDate/startTime/endDate/endTime timestamps to determine the correct
+    // visual state (UPCOMING vs AVAILABLE vs EXPIRED) so we must include both statuses.
+    const qTests = query(collection(db, 'tests'), where('status', 'in', ['published', 'scheduled']));
     const unsubscribeTests = onSnapshot(
       qTests,
       async (snapshot) => {
@@ -141,7 +145,9 @@ export const AvailableTestsView: React.FC = () => {
           const list: any[] = [];
           for (const docSnap of snapshot.docs) {
             const data = docSnap.data();
-            if (data.assignmentType === 'all') {
+            // Treat missing availabilityType as 'later'; 'all' assignmentType means every student
+            const aType = data.availabilityType || 'later';
+            if (aType === 'all' || data.assignmentType === 'all') {
               list.push({ id: docSnap.id, ...data });
             } else {
               const assignedRef = doc(db, 'tests', docSnap.id, 'assignedStudents', currentUser.uid);

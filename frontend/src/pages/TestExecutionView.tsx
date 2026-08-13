@@ -95,7 +95,7 @@ export const TestExecutionView: React.FC = () => {
   const [attemptId, setAttemptId] = useState<string>('');
   const [expiresAtMs, setExpiresAtMs] = useState<number>(0);
   const [exitCount, setExitCount] = useState<number>(0);
-  const [submitToastInfo, setSubmitToastInfo] = useState<{ message: string; type: 'success' | 'warning' } | null>(null);
+  const [_submitToastInfo, setSubmitToastInfo] = useState<{ message: string; type: 'success' | 'warning' } | null>(null);
 
   // Question Navigation State
   const [currentIndex, setCurrentIndex] = useState<number>(0);

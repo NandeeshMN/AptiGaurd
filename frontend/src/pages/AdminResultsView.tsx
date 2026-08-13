@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Download, Calendar, Users, Award, TrendingUp, CheckCircle2, AlertTriangle, FileText } from 'lucide-react';
+import { Search, Download, Calendar, FileText } from 'lucide-react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-import { formatTimeTo12Hour, formatTimeWindow, formatDateToDDMMYYYY } from '../utils/timeFormat';
+import { formatTimeWindow, formatDateToDDMMYYYY } from '../utils/timeFormat';
 
 // Helper function to render Top 3 Emoji Symbols + Rank number to high-resolution PNG Data URL for jsPDF
 const generateMedalRankImage = (emoji: string, rankNum: number): string => {
@@ -382,8 +382,6 @@ export const AdminResultsView: React.FC = () => {
     const testAttemptsList = attempts.filter((a) => a.testId === t.id);
     const dateMeta = getTestDateObject(t, testAttemptsList);
     const participantsCount = testAttemptsList.length;
-
-    const scores = testAttemptsList.map((a) => a.score ?? 0);
     const pcts = testAttemptsList.map((a) => {
       if (a.percentage !== undefined) return a.percentage;
       const totalM = a.totalMarks || t.targetMarks || 100;
