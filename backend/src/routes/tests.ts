@@ -86,28 +86,53 @@ router.get('/available', requireAuth, async (req: AuthRequest, res: Response): P
 
 import { sendBatchTestUpdateEmails } from '../services/brevoService';
 
-const triggerTestUpdateEmailsAsync = (testId: string, testTitle: string, changedDetails: string[], testData: any) => {
-  setImmediate(async () => {
-    try {
-      if (!adminDb) return;
+const triggerTestUpdateEmailsAsync = async (testId: string, testTitle: string, changedDetails: string[], testData: any) => {
+  try {
+    if (!adminDb) return;
 
-      console.log(`[Test Update]\nTest updated successfully: ${testId}`);
+    console.log(`[Test Update]\nTest updated successfully: ${testId}`);
 
-      const testDocRef = adminDb.collection('tests').doc(testId);
-      const testSnap = await testDocRef.get();
-      const currentData = testSnap.exists ? { ...testSnap.data(), ...testData } : testData;
+    const testDocRef = adminDb.collection('tests').doc(testId);
+    const testSnap = await testDocRef.get();
+    const currentData = testSnap.exists ? { ...testSnap.data(), ...testData } : testData;
 
-      const assignmentType = currentData.assignmentType || 'all';
-      const recipientsMap = new Map<string, { email: string; name: string }>();
+    const assignmentType = currentData.assignmentType || 'all';
+    const recipientsMap = new Map<string, { email: string; name: string }>();
 
-      if (assignmentType === 'all') {
-        const usersSnap = await adminDb.collection('users').get();
-        usersSnap.forEach((uDoc) => {
-          const u = uDoc.data();
+    if (assignmentType === 'all') {
+      const usersSnap = await adminDb.collection('users').get();
+      usersSnap.forEach((uDoc) => {
+        const u = uDoc.data();
+        const rawEmail = u.email ? String(u.email).trim().toLowerCase() : '';
+        const role = (u.role || '').toLowerCase();
+
+        if (rawEmail && role !== 'admin' && rawEmail !== 'nandeeshmn12@gmail.com') {
+          let rawName = u.name || u.fullName || u.displayName || '';
+          if (!rawName || rawName.includes('@')) {
+            const prefix = rawEmail.split('@')[0];
+            rawName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+          }
+          recipientsMap.set(rawEmail, { email: rawEmail, name: rawName });
+        }
+      });
+    } else {
+      const assignedUids = new Set<string>(
+        Array.isArray(currentData.selectedStudentUids) ? currentData.selectedStudentUids : []
+      );
+
+      const assignedSubSnap = await testDocRef.collection('assignedStudents').get();
+      assignedSubSnap.forEach((aDoc) => {
+        const aData = aDoc.data();
+        const uid = aData.uid || aDoc.id;
+        if (uid) assignedUids.add(uid);
+      });
+
+      for (const uid of Array.from(assignedUids)) {
+        const uSnap = await adminDb.collection('users').doc(uid).get();
+        if (uSnap.exists) {
+          const u = uSnap.data() || {};
           const rawEmail = u.email ? String(u.email).trim().toLowerCase() : '';
-          const role = (u.role || '').toLowerCase();
-
-          if (rawEmail && role !== 'admin' && rawEmail !== 'nandeeshmn12@gmail.com') {
+          if (rawEmail) {
             let rawName = u.name || u.fullName || u.displayName || '';
             if (!rawName || rawName.includes('@')) {
               const prefix = rawEmail.split('@')[0];
@@ -115,64 +140,38 @@ const triggerTestUpdateEmailsAsync = (testId: string, testTitle: string, changed
             }
             recipientsMap.set(rawEmail, { email: rawEmail, name: rawName });
           }
-        });
-      } else {
-        const assignedUids = new Set<string>(
-          Array.isArray(currentData.selectedStudentUids) ? currentData.selectedStudentUids : []
-        );
-
-        const assignedSubSnap = await testDocRef.collection('assignedStudents').get();
-        assignedSubSnap.forEach((aDoc) => {
-          const aData = aDoc.data();
-          const uid = aData.uid || aDoc.id;
-          if (uid) assignedUids.add(uid);
-        });
-
-        for (const uid of Array.from(assignedUids)) {
-          const uSnap = await adminDb.collection('users').doc(uid).get();
-          if (uSnap.exists) {
-            const u = uSnap.data() || {};
-            const rawEmail = u.email ? String(u.email).trim().toLowerCase() : '';
-            if (rawEmail) {
-              let rawName = u.name || u.fullName || u.displayName || '';
-              if (!rawName || rawName.includes('@')) {
-                const prefix = rawEmail.split('@')[0];
-                rawName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
-              }
-              recipientsMap.set(rawEmail, { email: rawEmail, name: rawName });
-            }
-          }
         }
       }
-
-      const recipients = Array.from(recipientsMap.values());
-      console.log(`[Test Update Email]\nEligible recipients: ${recipients.length}`);
-
-      if (recipients.length > 0) {
-        console.log(`[Test Update Email]\nDispatch started`);
-
-        const effectiveChanges = changedDetails && changedDetails.length > 0
-          ? changedDetails
-          : ['Assessment configuration or schedule has been updated.'];
-
-        const batchStats = await sendBatchTestUpdateEmails(recipients, {
-          testTitle: testTitle || currentData.title || 'Assessment',
-          changedDetails: effectiveChanges,
-          startDate: currentData.startDate,
-          startTime: currentData.startTime,
-          endDate: currentData.endDate,
-          endTime: currentData.endTime,
-          duration: currentData.duration,
-        });
-
-        console.log(`[Test Update Email]\nCompleted: ${batchStats.sentCount}\nFailed: ${batchStats.failedCount}`);
-      } else {
-        console.log(`[Test Update Email]\nNotice: No eligible recipients found for test ${testId}`);
-      }
-    } catch (err: any) {
-      console.error(`[Test Update Email] Dispatch error:`, err?.message || err);
     }
-  });
+
+    const recipients = Array.from(recipientsMap.values());
+    console.log(`[Test Update Email]\nEligible recipients: ${recipients.length}`);
+
+    if (recipients.length > 0) {
+      console.log(`[Test Update Email]\nDispatch started`);
+
+      const effectiveChanges = changedDetails && changedDetails.length > 0
+        ? changedDetails
+        : ['Assessment configuration or schedule has been updated.'];
+
+      const batchStats = await sendBatchTestUpdateEmails(recipients, {
+        testTitle: testTitle || currentData.title || 'Assessment',
+        changedDetails: effectiveChanges,
+        startDate: currentData.startDate,
+        startTime: currentData.startTime,
+        endDate: currentData.endDate,
+        endTime: currentData.endTime,
+        duration: currentData.duration,
+      });
+
+      console.log(`[Test Update Email]\nCompleted: ${batchStats.sentCount}\nFailed: ${batchStats.failedCount}`);
+    } else {
+      console.log(`[Test Update Email]\nNotice: No eligible recipients found for test ${testId}`);
+    }
+  } catch (err: any) {
+    console.error(`[Test Update Email] Dispatch error:`, err?.message || err);
+    throw err;
+  }
 };
 
 // PUT /api/tests/:testId -> Update existing test details, update Firestore, and trigger Brevo emails
@@ -279,17 +278,22 @@ router.put('/:testId', requireAuth, requireAdmin, async (req: AuthRequest, res: 
       }
     }
 
-    // Respond immediately to Admin UI
-    res.json({
-      success: true,
-      message: 'Test updated successfully.',
-      changedDetails,
-    });
-
     // Trigger async Brevo emails if there are meaningful change details
     const finalTitle = body.title || oldData.title || 'Assessment';
-    triggerTestUpdateEmailsAsync(testId, finalTitle, changedDetails, updatePayload);
+    try {
+      await triggerTestUpdateEmailsAsync(testId, finalTitle, changedDetails, updatePayload);
+    } catch (emailErr: any) {
+      console.error('Email dispatch failed:', emailErr);
+      res.status(500).json({ success: false, message: 'Test updated in database, but failed to send update emails: ' + emailErr.message });
+      return;
+    }
 
+    // Respond to Admin UI after email finishes
+    res.json({
+      success: true,
+      message: 'Test updated successfully and emails dispatched.',
+      changedDetails,
+    });
   } catch (error: any) {
     console.error('Update test error:', error);
     res.status(500).json({ success: false, message: 'Failed to update test.' });

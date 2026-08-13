@@ -374,11 +374,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
-            if (res.status === 403) {
-              setUiAlertMsg(data.message || 'Test has already started and can no longer be edited.');
-              backendFailed = true;
-              return;
-            }
+            setUiAlertMsg(data.message || 'Failed to update test on server.');
+            backendFailed = true;
+            return;
           }
         } catch (apiErr) {
           console.warn('[UpdateTest] Backend update API warning:', apiErr);
