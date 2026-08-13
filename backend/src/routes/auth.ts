@@ -25,6 +25,7 @@ const generate6DigitOTP = (): string => {
  * Common handler for sending OTP via Brevo
  */
 const handleSendOtpLogic = async (req: Request, res: Response): Promise<void> => {
+  console.log('[OTP] Request received');
   const { email } = req.body;
 
   if (!email || typeof email !== 'string' || !EMAIL_REGEX.test(email.trim())) {
@@ -49,11 +50,13 @@ const handleSendOtpLogic = async (req: Request, res: Response): Promise<void> =>
       if (userRecord.displayName) {
         recipientName = userRecord.displayName;
       }
+      console.log('[OTP] User lookup completed');
     } catch {
       // User profile lookup notice (continue cleanly)
     }
   }
 
+  console.log('[OTP] Brevo request started');
   // Deliver OTP via Brevo API
   const emailResult = await sendOTPEmail({
     recipientEmail: sanitizedEmail,

@@ -34,7 +34,7 @@ app.use('/api/auth', authRouter);
 // Basic health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({
-    status: 'ok',
+    success: true,
     message: 'AptiGuard backend is running',
   });
 });

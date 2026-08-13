@@ -143,14 +143,15 @@ export const sendOTPEmail = async ({
     });
 
     const data: any = await response.json().catch(() => ({}));
+    console.log('[OTP] Brevo response received');
 
     if (!response.ok) {
       const errorMsg = data?.message || data?.code || `HTTP ${response.status}`;
-      console.error(`[BrevoService] Failed to send OTP email to ${recipientEmail}: ${errorMsg}`);
+      console.error(`[OTP] Failed to send OTP email to ${recipientEmail}: ${errorMsg}`);
       return { success: false, message: errorMsg };
     }
 
-    console.log(`[BrevoService] OTP email sent successfully to ${recipientEmail}. Message ID: ${data?.messageId || 'N/A'}`);
+    console.log(`[OTP] OTP sent successfully to ${recipientEmail}. Message ID: ${data?.messageId || 'N/A'}`);
     return { success: true };
   } catch (error: any) {
     console.error('[BrevoService] Network error while calling Brevo API:', error?.message || error);
