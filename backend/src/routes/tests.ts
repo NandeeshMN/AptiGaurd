@@ -201,7 +201,7 @@ router.put('/:testId', requireAuth, requireAdmin, async (req: AuthRequest, res: 
     } else {
       const sDate = oldData.startDate || '';
       const sTime = oldData.startTime || '00:00';
-      startMs = new Date(`${sDate}T${sTime}:00`).getTime();
+      startMs = new Date(`${sDate}T${sTime}:00+05:30`).getTime();
     }
 
     if (startMs > 0 && nowMs >= startMs) {
@@ -347,8 +347,8 @@ router.patch('/:testId/publish', requireAuth, requireAdmin, async (req: AuthRequ
       }
 
       const now = new Date();
-      const schedStart = new Date(`${startDate}T${startTime}`);
-      const schedEnd = new Date(`${endDate}T${endTime}`);
+      const schedStart = new Date(`${startDate}T${startTime}:00+05:30`);
+      const schedEnd = new Date(`${endDate}T${endTime}:00+05:30`);
 
       if (schedEnd <= now) {
         targetStatus = 'expired';
@@ -410,8 +410,9 @@ const getTestScheduleBoundsServer = (testData: any) => {
   const eDate = testData.endDate || sDate;
   const eTime = testData.endTime || '23:59';
 
-  const startMs = new Date(`${sDate}T${sTime}:00`).getTime();
-  const endMs = new Date(`${eDate}T${eTime}:00`).getTime();
+  // Force parse as IST (+05:30) to match the Indian local time selected by users in the UI
+  const startMs = new Date(`${sDate}T${sTime}:00+05:30`).getTime();
+  const endMs = new Date(`${eDate}T${eTime}:00+05:30`).getTime();
 
   return {
     startTimeMs: isNaN(startMs) ? 0 : startMs,
