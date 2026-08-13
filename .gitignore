@@ -27,10 +27,8 @@ lerna-debug.log*
 
 # Editor / System files
 .vscode/
-.idea/
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+# Firebase credentials
+**/firebase.json
+backend/config/firebase.json
+backend/src/config/firebase.json
+*.json.key

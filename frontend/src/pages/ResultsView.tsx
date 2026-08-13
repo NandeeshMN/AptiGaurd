@@ -3,6 +3,7 @@ import { Search, Trophy, CheckCircle, BarChart3, TrendingUp } from 'lucide-react
 import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
+import { formatDateToDDMMYYYY } from '../utils/timeFormat';
 
 // Pure 2D Canvas PNG Result Card Generator
 export const downloadCandidateResultCardPNG = (att: any, candidateName: string) => {
@@ -37,9 +38,7 @@ export const downloadCandidateResultCardPNG = (att: any, candidateName: string) 
     ctx.fillStyle = '#93c5fd';
     ctx.fillText('OFFICIAL CANDIDATE RESULT CARD', 35, 66);
 
-    const dateStr = att.submittedAt?.seconds
-      ? new Date(att.submittedAt.seconds * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-      : (att.startedAtMs ? new Date(att.startedAtMs).toLocaleDateString() : 'N/A');
+    const dateStr = formatDateToDDMMYYYY(att.submittedAt || att.startedAtMs);
 
     ctx.textAlign = 'right';
     ctx.fillStyle = '#ffffff';
@@ -80,7 +79,7 @@ export const downloadCandidateResultCardPNG = (att: any, candidateName: string) 
 
       ctx.fillStyle = '#64748b';
       ctx.font = 'bold 9px sans-serif';
-      ctx.fillText(label, x + 12, 252);
+      ctx.fillText(label.toUpperCase(), x + 12, 252);
 
       ctx.fillStyle = color;
       ctx.font = 'bold 18px sans-serif';
@@ -119,7 +118,7 @@ export const downloadCandidateResultCardPNG = (att: any, candidateName: string) 
     // Download PNG file
     const image = canvas.toDataURL('image/png');
     const link = document.createElement('a');
-    const cleanName = candidateName.replace(/\s+/g, '_');
+    const cleanName = (candidateName || 'Candidate').replace(/\s+/g, '_');
     link.href = image;
     link.download = `AptiGuard_Result_Card_${cleanName}.png`;
     document.body.appendChild(link);
@@ -234,9 +233,7 @@ export const ResultsView: React.FC = () => {
   const resultsData = attempts.map((att) => {
     const pct = att.percentage ?? 0;
     const isPassed = pct >= 40;
-    const dateStr = att.submittedAt?.seconds
-      ? new Date(att.submittedAt.seconds * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-      : (att.startedAtMs ? new Date(att.startedAtMs).toLocaleDateString() : 'N/A');
+    const dateStr = formatDateToDDMMYYYY(att.submittedAt || att.startedAtMs);
 
     return {
       id: att.id,

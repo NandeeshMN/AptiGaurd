@@ -48,3 +48,54 @@ export const formatTimeWindow = (startTime?: string, endTime?: string): string =
   }
   return 'Immediate / Active Schedule';
 };
+
+/**
+ * Formats a Date object, ISO string, 'YYYY-MM-DD' string, or timestamp (in ms or seconds)
+ * into strict DD/MM/YYYY format (e.g., "13/08/2026", "05/01/2026").
+ */
+export const formatDateToDDMMYYYY = (dateInput?: any): string => {
+  if (!dateInput) return 'N/A';
+
+  try {
+    let d: Date | null = null;
+
+    if (dateInput instanceof Date) {
+      d = dateInput;
+    } else if (typeof dateInput === 'number') {
+      d = new Date(dateInput > 1e11 ? dateInput : dateInput * 1000);
+    } else if (typeof dateInput === 'object' && dateInput?.seconds !== undefined) {
+      d = new Date(dateInput.seconds * 1000);
+    } else if (typeof dateInput === 'string') {
+      const trimmed = dateInput.trim();
+      if (!trimmed) return 'N/A';
+
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) {
+        return trimmed;
+      }
+
+      if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+        const parts = trimmed.split('T')[0].split('-');
+        if (parts.length === 3) {
+          const year = parts[0];
+          const month = parts[1];
+          const day = parts[2];
+          return `${day}/${month}/${year}`;
+        }
+      }
+
+      d = new Date(trimmed);
+    }
+
+    if (!d || isNaN(d.getTime())) {
+      return 'N/A';
+    }
+
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+
+    return `${day}/${month}/${year}`;
+  } catch (err) {
+    return 'N/A';
+  }
+};

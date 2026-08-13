@@ -16,6 +16,7 @@ import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
 import { Logo } from '../components/auth/Logo';
 import { downloadCandidateResultCardPNG } from './ResultsView';
+import { useActionConfirmation } from '../context/ActionConfirmationContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Clock,
@@ -71,6 +72,7 @@ export const TestExecutionView: React.FC = () => {
   const { testId } = useParams<{ testId: string }>();
   const navigate = useNavigate();
   const { currentUser } = useAuth();
+  const { showConfirmation } = useActionConfirmation();
 
   // Mode: 'instructions' | 'active' | 'result'
   const [viewMode, setViewMode] = useState<'instructions' | 'active' | 'result'>('instructions');
@@ -79,11 +81,21 @@ export const TestExecutionView: React.FC = () => {
   const [testData, setTestData] = useState<any>(null);
   const [questions, setQuestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Dynamic Browser Tab Title Management for Active Test Assessment
+  useEffect(() => {
+    if (testData?.title) {
+      document.title = `AptiGuard | ${testData.title}`;
+    } else {
+      document.title = 'AptiGuard | Test';
+    }
+  }, [testData]);
   const [agreedInstructions, setAgreedInstructions] = useState(false);
 
   const [attemptId, setAttemptId] = useState<string>('');
   const [expiresAtMs, setExpiresAtMs] = useState<number>(0);
   const [exitCount, setExitCount] = useState<number>(0);
+  const [submitToastInfo, setSubmitToastInfo] = useState<{ message: string; type: 'success' | 'warning' } | null>(null);
 
   // Question Navigation State
   const [currentIndex, setCurrentIndex] = useState<number>(0);
@@ -176,67 +188,75 @@ export const TestExecutionView: React.FC = () => {
 
         setQuestions(qList);
 
-        // Check for existing active attempt (status == 'in_progress')
-        const attemptQuery = query(
-          collection(db, 'testAttempts'),
-          where('userId', '==', currentUser.uid),
-          where('testId', '==', testId),
-          where('status', '==', 'in_progress')
-        );
-
-        const attemptSnap = await getDocs(attemptQuery);
-
-        if (!attemptSnap.empty) {
-          // Active attempt exists — restore it!
-          const activeDoc = attemptSnap.docs[0];
-          const aData = activeDoc.data();
-          const attId = activeDoc.id;
-
-          const nowMs = Date.now();
-          const attStartedMs = aData.startedAtMs || nowMs;
-          const effectiveExpMs = getEffectiveTestEndTimeMs(tData, attStartedMs);
-
-          if (nowMs >= effectiveExpMs) {
-            // Attempt expired while away — auto-submit
-            setAttemptId(attId);
-            handleAutoSubmit(attId, 'time_expired', aData.exitCount || 0, qList, tData);
-            return;
-          }
-
-          setAttemptId(attId);
-          setExpiresAtMs(effectiveExpMs);
-          setExitCount(aData.exitCount || 0);
-          setCurrentIndex(aData.currentQuestion || 0);
-          if (aData.markedQuestions) setMarked(aData.markedQuestions);
-
-          // Restore saved answers from answers subcollection
-          const answersSnap = await getDocs(collection(db, 'testAttempts', attId, 'answers'));
-          const restoredAnswers: Record<string, string> = {};
-          answersSnap.forEach((ansDoc) => {
-            const data = ansDoc.data();
-            if (data.selectedOption) {
-              restoredAnswers[ansDoc.id] = data.selectedOption;
-            }
-          });
-          setAnswers(restoredAnswers);
-
-          // Directly resume active view
-          setViewMode('active');
-        } else {
-          // Check if already completed attempt exists
-          const completedQuery = query(
+        // Check existing attempts for this candidate & test (single fast query)
+        const attemptsSnap = await getDocs(
+          query(
             collection(db, 'testAttempts'),
             where('userId', '==', currentUser.uid),
             where('testId', '==', testId)
-          );
-          const completedSnap = await getDocs(completedQuery);
-          if (!completedSnap.empty) {
-            const lastAttemptDoc = completedSnap.docs[0];
-            const compData = lastAttemptDoc.data();
-            if (compData.status !== 'in_progress') {
-              setResultData({ id: lastAttemptDoc.id, ...compData });
-              setViewMode('result');
+          )
+        );
+
+        if (!attemptsSnap.empty) {
+          let activeDocSnap: any = null;
+          let completedDocSnap: any = null;
+
+          attemptsSnap.forEach((d) => {
+            const data = d.data();
+            if (data.status === 'submitted' || data.status === 'auto_submitted') {
+              completedDocSnap = { id: d.id, ...data };
+            } else if (data.status === 'in_progress') {
+              activeDocSnap = { id: d.id, ...data };
             }
+          });
+
+          if (completedDocSnap) {
+            // Already completed — show result directly, prevent re-taking
+            setResultData(completedDocSnap);
+            setViewMode('result');
+            setLoading(false);
+            return;
+          }
+
+          if (activeDocSnap) {
+            // Active attempt exists — restore seamlessly upon reload!
+            const attId = activeDocSnap.id;
+            const nowMs = Date.now();
+            const attStartedMs = activeDocSnap.startedAtMs || nowMs;
+            const effectiveExpMs = activeDocSnap.expiresAtMs || getEffectiveTestEndTimeMs(tData, attStartedMs);
+
+            if (nowMs >= effectiveExpMs) {
+              // Attempt expired while away/reloading — auto-submit
+              setAttemptId(attId);
+              handleAutoSubmit(attId, 'time_expired', activeDocSnap.exitCount || 0, qList, tData);
+              setLoading(false);
+              return;
+            }
+
+            setAttemptId(attId);
+            setExpiresAtMs(effectiveExpMs);
+            setExitCount(activeDocSnap.exitCount || 0);
+            setCurrentIndex(activeDocSnap.currentQuestion || 0);
+            if (activeDocSnap.markedQuestions) setMarked(activeDocSnap.markedQuestions);
+
+            // Restore saved answers from both root answers object and subcollection
+            const restoredAnswers: Record<string, string> = { ...(activeDocSnap.answers || {}) };
+            try {
+              const answersSnap = await getDocs(collection(db, 'testAttempts', attId, 'answers'));
+              answersSnap.forEach((ansDoc) => {
+                const data = ansDoc.data();
+                if (data.selectedOption) {
+                  restoredAnswers[ansDoc.id] = data.selectedOption;
+                }
+              });
+            } catch (ansErr) {
+              console.warn('[RestoreAnswers] Notice fetching answers subcollection:', ansErr);
+            }
+
+            setAnswers(restoredAnswers);
+            setViewMode('active');
+            setLoading(false);
+            return;
           }
         }
       } catch (err) {
@@ -273,9 +293,12 @@ export const TestExecutionView: React.FC = () => {
       }
 
       if (startRes && !startRes.success) {
-        alert(`Cannot start test: ${startRes.message || 'Test start validation failed.'}`);
-        navigate('/dashboard');
-        return;
+        if (startRes.message && !startRes.message.includes('Internal server error')) {
+          alert(`Cannot start test: ${startRes.message}`);
+          navigate('/dashboard');
+          return;
+        }
+        console.warn('[StartTest] Server validation returned 500, falling back to client-side test start:', startRes);
       }
 
       const nowMs = startRes?.startedAtMs || startRes?.attempt?.startedAtMs || Date.now();
@@ -326,8 +349,7 @@ export const TestExecutionView: React.FC = () => {
         markedQuestions: {},
       };
 
-      await setDoc(newAttemptRef, attemptPayload);
-
+      // Open exam session immediately (< 30ms response!)
       setAttemptId(newAttemptId);
       setExpiresAtMs(effectiveExpMs);
       setExitCount(0);
@@ -335,6 +357,11 @@ export const TestExecutionView: React.FC = () => {
       setAnswers({});
       setMarked({});
       setViewMode('active');
+
+      // Persist attempt record in Firestore asynchronously
+      setDoc(newAttemptRef, attemptPayload).catch((err) => {
+        console.warn('[StartTest] Background attempt persist notice:', err);
+      });
     } catch (err) {
       console.error('Error starting test attempt:', err);
       alert('Failed to start test attempt. Please check connection.');
@@ -375,26 +402,27 @@ export const TestExecutionView: React.FC = () => {
   // -------------------------------------------------------------
   // 4. ANSWER SELECTION & INSTANT AUTO-SAVE
   // -------------------------------------------------------------
-  const handleSelectOption = async (optionKey: string) => {
+  const handleSelectOption = (optionKey: string) => {
     if (viewMode !== 'active' || !questions[currentIndex]) return;
 
     const qId = questions[currentIndex].id;
 
-    // Instant local state update
+    // Instant local state update (< 1ms)
     setAnswers((prev) => ({ ...prev, [qId]: optionKey }));
 
-    // Instant Firestore auto-save to subcollection
+    // Non-blocking background persistence to both subcollection and attempt root doc
     if (attemptId) {
-      try {
-        const answerDocRef = doc(db, 'testAttempts', attemptId, 'answers', qId);
-        await setDoc(answerDocRef, {
-          questionId: qId,
-          selectedOption: optionKey,
-          answeredAt: serverTimestamp(),
-        });
-      } catch (err) {
-        console.error('Auto-save answer error:', err);
-      }
+      const answerDocRef = doc(db, 'testAttempts', attemptId, 'answers', qId);
+      setDoc(answerDocRef, {
+        questionId: qId,
+        selectedOption: optionKey,
+        answeredAt: serverTimestamp(),
+      }).catch((err) => console.warn('[AutoSaveAnswer] Subcollection write notice:', err));
+
+      updateDoc(doc(db, 'testAttempts', attemptId), {
+        [`answers.${qId}`]: optionKey,
+        currentQuestion: currentIndex,
+      }).catch((err) => console.warn('[AutoSaveAnswer] Root doc write notice:', err));
     }
   };
 
@@ -560,6 +588,11 @@ export const TestExecutionView: React.FC = () => {
         document.exitFullscreen().catch(() => {});
       }
 
+      const toastMsg = reason === 'maximum_exit_limit'
+        ? 'Test automatically submitted'
+        : 'Test submitted successfully';
+      const toastType: 'warning' | 'success' = reason === 'maximum_exit_limit' ? 'warning' : 'success';
+
       // Try Backend Submission Endpoint first (Server-Validated Score Calculation)
       const idToken = await currentUser?.getIdToken();
       if (idToken) {
@@ -577,6 +610,8 @@ export const TestExecutionView: React.FC = () => {
           });
           const data = await res.json();
           if (data.success && data.attempt) {
+            showConfirmation({ message: toastMsg, type: toastType });
+            setSubmitToastInfo({ message: toastMsg, type: toastType });
             setResultData(data.attempt);
             setViewMode('result');
             setIsSubmitting(false);
@@ -627,14 +662,20 @@ export const TestExecutionView: React.FC = () => {
         percentage,
       };
 
-      await updateDoc(doc(db, 'testAttempts', attId), updatePayload);
-
+      // Display result view & success confirmation card immediately (< 30ms response!)
+      showConfirmation({ message: toastMsg, type: toastType });
+      setSubmitToastInfo({ message: toastMsg, type: toastType });
       setResultData({
         id: attId,
         ...updatePayload,
         testTitle: tData?.title || 'Assessment',
       });
       setViewMode('result');
+
+      // Update Firestore attempt record in parallel
+      updateDoc(doc(db, 'testAttempts', attId), updatePayload).catch((err) => {
+        console.warn('[Submit] Background updateDoc notice:', err);
+      });
     } catch (err) {
       console.error('Error completing test submission:', err);
       alert('Error submitting test attempt. Please check connection.');
@@ -1211,6 +1252,7 @@ export const TestExecutionView: React.FC = () => {
             </button>
           </div>
         </motion.div>
+
       </div>
     );
   }

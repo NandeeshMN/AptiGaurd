@@ -178,6 +178,29 @@ router.put('/:testId', requireAuth, requireAdmin, async (req: AuthRequest, res: 
     }
 
     const oldData = existingSnap.data() || {};
+    const nowMs = Date.now();
+
+    // SERVER-TIME AUTHORITATIVE EDIT LOCK ENFORCEMENT
+    // Once scheduled start time has been reached, editing is permanently locked on backend.
+    const availabilityType = oldData.availabilityType || 'later';
+    let startMs = 0;
+
+    if (availabilityType === 'immediate') {
+      startMs = oldData.createdAt?.toDate ? oldData.createdAt.toDate().getTime() : 0;
+    } else {
+      const sDate = oldData.startDate || '';
+      const sTime = oldData.startTime || '00:00';
+      startMs = new Date(`${sDate}T${sTime}:00`).getTime();
+    }
+
+    if (startMs > 0 && nowMs >= startMs) {
+      res.status(403).json({
+        success: false,
+        message: 'Test has already started and can no longer be edited after the scheduled start time.',
+      });
+      return;
+    }
+
     const body = req.body || {};
 
     const changedDetails: string[] = [];
@@ -208,6 +231,11 @@ router.put('/:testId', requireAuth, requireAdmin, async (req: AuthRequest, res: 
     }
     if (body.targetMarks !== undefined && Number(body.targetMarks) !== Number(oldData.targetMarks)) {
       changedDetails.push(`Total Marks: ${oldData.targetMarks || 0} → ${body.targetMarks}`);
+    }
+    if (body.enableNegative !== undefined && Boolean(body.enableNegative) !== Boolean(oldData.enableNegative)) {
+      changedDetails.push(`Negative Marking: ${oldData.enableNegative ? `Enabled (${oldData.negativeMarks || 0})` : 'Disabled'} → ${body.enableNegative ? `Enabled (${body.negativeMarks || 0})` : 'Disabled'}`);
+    } else if (body.enableNegative && body.negativeMarks !== undefined && Number(body.negativeMarks) !== Number(oldData.negativeMarks)) {
+      changedDetails.push(`Negative Penalty: ${oldData.negativeMarks || 0} marks → ${body.negativeMarks} marks`);
     }
     if (body.status && body.status !== oldData.status) {
       changedDetails.push(`Status: ${oldData.status || 'draft'} → ${body.status}`);
@@ -348,7 +376,7 @@ router.patch('/:testId/publish', requireAuth, requireAdmin, async (req: AuthRequ
     );
   } catch (error: any) {
     console.error('Publish test error:', error);
-    res.status(500).json({ success: false, message: 'Internal server error while publishing.' });
+    res.status(500).json({ success: false, message: 'Internal server error while publishing test.' });
   }
 });
 
@@ -419,23 +447,28 @@ router.post('/:testId/start', requireAuth, async (req: AuthRequest, res: Respons
       }
     }
 
-    // Check existing attempts for this user & test
-    const attemptsSnap = await adminDb!.collection('testAttempts')
-      .where('userId', '==', userId)
-      .where('testId', '==', testId)
-      .get();
-
+    // Check existing attempts for this user & test safely (prevents missing index errors)
     let activeAttempt: any = null;
     let isCompleted = false;
 
-    attemptsSnap.forEach(aDoc => {
-      const a = aDoc.data();
-      if (a.status === 'submitted' || a.status === 'auto_submitted') {
-        isCompleted = true;
-      } else if (a.status === 'in_progress') {
-        activeAttempt = { id: aDoc.id, ...a };
-      }
-    });
+    try {
+      const attemptsSnap = await adminDb!.collection('testAttempts')
+        .where('userId', '==', userId)
+        .get();
+
+      attemptsSnap.forEach(aDoc => {
+        const a = aDoc.data();
+        if (a.testId === testId) {
+          if (a.status === 'submitted' || a.status === 'auto_submitted') {
+            isCompleted = true;
+          } else if (a.status === 'in_progress') {
+            activeAttempt = { id: aDoc.id, ...a };
+          }
+        }
+      });
+    } catch (attemptsErr) {
+      console.warn('[Start Test] Safe attempts fetch fallback:', attemptsErr);
+    }
 
     if (isCompleted) {
       res.status(400).json({ success: false, message: 'Test has already been completed.' });

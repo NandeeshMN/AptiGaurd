@@ -5,7 +5,7 @@ import { db } from '../config/firebase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-import { formatTimeTo12Hour, formatTimeWindow } from '../utils/timeFormat';
+import { formatTimeTo12Hour, formatTimeWindow, formatDateToDDMMYYYY } from '../utils/timeFormat';
 
 // Helper function to render Top 3 Emoji Symbols + Rank number to high-resolution PNG Data URL for jsPDF
 const generateMedalRankImage = (emoji: string, rankNum: number): string => {
@@ -91,13 +91,9 @@ export const AdminResultsView: React.FC = () => {
     };
   }, []);
 
-  // Helper to format date header (e.g. "11 August 2026")
+  // Helper to format date header into strict DD/MM/YYYY format
   const formatDateHeader = (dateObj: Date): string => {
-    return dateObj.toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-    });
+    return formatDateToDDMMYYYY(dateObj);
   };
 
   // Resolve test date object

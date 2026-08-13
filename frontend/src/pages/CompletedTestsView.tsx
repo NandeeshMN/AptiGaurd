@@ -4,6 +4,7 @@ import { collection, doc, getDoc, query, where, onSnapshot } from 'firebase/fire
 import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
 import { downloadCandidateResultCardPNG } from './ResultsView';
+import { formatDateToDDMMYYYY } from '../utils/timeFormat';
 
 export const CompletedTestsView: React.FC = () => {
   const { currentUser } = useAuth();
@@ -48,51 +49,33 @@ export const CompletedTestsView: React.FC = () => {
         }
 
         if (att.status === 'submitted' || att.status === 'auto_submitted') {
-          // Check if test scheduled end time has passed OR if immediate test
-          let testEndTimeMs = Infinity;
-          const matchingTest = assignedTestsCache.find(t => t.id === att.testId);
+          const pct = att.percentage ?? 0;
+          const isPassed = pct >= 40;
+          const dateStr = formatDateToDDMMYYYY(att.submittedAt || att.startedAtMs);
 
-          if (matchingTest && matchingTest.availabilityType !== 'immediate') {
-            const eDate = matchingTest.endDate || matchingTest.startDate || '';
-            const eTime = matchingTest.endTime || '23:59';
-            const eMs = new Date(`${eDate}T${eTime}:00`).getTime();
-            if (!isNaN(eMs)) {
-              testEndTimeMs = eMs;
-            }
-          }
+          const subReason = att.submissionReason
+            ? (att.submissionReason === 'manual_submission'
+              ? 'Manual Submission'
+              : att.submissionReason === 'maximum_exit_limit'
+                ? 'Auto - 3 Violations'
+                : 'Auto - Time Expired')
+            : (att.status === 'submitted' ? 'Manual Submission' : 'Auto Submitted');
 
-          // Move to Completed Tests history ONLY when currentNowMs >= testEndTimeMs (or immediate availability)
-          if (currentNowMs >= testEndTimeMs || (!matchingTest || matchingTest.availabilityType === 'immediate')) {
-            const pct = att.percentage ?? 0;
-            const isPassed = pct >= 40;
-            const dateStr = att.submittedAt?.seconds
-              ? new Date(att.submittedAt.seconds * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-              : (att.startedAtMs ? new Date(att.startedAtMs).toLocaleDateString() : 'N/A');
-
-            const subReason = att.submissionReason
-              ? (att.submissionReason === 'manual_submission'
-                ? 'Manual Submission'
-                : att.submissionReason === 'maximum_exit_limit'
-                  ? 'Auto - 3 Violations'
-                  : 'Auto - Time Expired')
-              : (att.status === 'submitted' ? 'Manual Submission' : 'Auto Submitted');
-
-            compList.push({
-              id: att.id,
-              type: 'completed',
-              rawAttempt: att,
-              title: att.testTitle || 'Assessment',
-              date: dateStr,
-              questions: att.totalQuestions || 0,
-              totalMarks: att.totalMarks || 100,
-              score: att.score ?? 0,
-              percentage: pct,
-              isPassed,
-              subReason,
-              exitCount: att.exitCount || 0,
-              timestamp: att.submittedAt?.seconds ? att.submittedAt.seconds * 1000 : (att.startedAtMs || 0),
-            });
-          }
+          compList.push({
+            id: att.id,
+            type: 'completed',
+            rawAttempt: att,
+            title: att.testTitle || 'Assessment',
+            date: dateStr,
+            questions: att.totalQuestions || 0,
+            totalMarks: att.totalMarks || 100,
+            score: att.score ?? 0,
+            percentage: pct,
+            isPassed,
+            subReason,
+            exitCount: att.exitCount || 0,
+            timestamp: att.submittedAt?.seconds ? att.submittedAt.seconds * 1000 : (att.startedAtMs || 0),
+          });
         }
       });
 
@@ -116,7 +99,7 @@ export const CompletedTestsView: React.FC = () => {
             type: 'expired',
             rawTest: test,
             title: test.title || 'Assessment',
-            date: test.endDate ? new Date(test.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Expired',
+            date: formatDateToDDMMYYYY(test.endDate || test.startDate),
             questions: test.targetQuestions || 0,
             totalMarks: test.targetMarks || 0,
             score: 0,

@@ -1,28 +1,61 @@
 import * as admin from 'firebase-admin';
+import path from 'path';
+import fs from 'fs';
 import dotenv from 'dotenv';
 
+// 1. Ensure dotenv is loaded BEFORE Firebase Admin initialization
 dotenv.config();
 
 const projectId = process.env.FIREBASE_PROJECT_ID || 'aptigaurd';
 
+// 2. Centralized Firebase Admin Initialization using Service Account JSON
 if (admin.apps.length === 0) {
   try {
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    // Resolve service-account file path safely using Node's path & fs modules
+    const candidatePaths = [
+      process.env.FIREBASE_SERVICE_ACCOUNT_PATH ? path.resolve(process.cwd(), process.env.FIREBASE_SERVICE_ACCOUNT_PATH) : null,
+      path.resolve(process.cwd(), 'config/firebase.json'),
+      path.resolve(__dirname, '../../config/firebase.json'),
+      path.resolve(__dirname, 'firebase.json'),
+      path.resolve(__dirname, '../config/firebase.json'),
+    ].filter(Boolean) as string[];
+
+    let serviceAccountPath: string | null = null;
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        serviceAccountPath = p;
+        break;
+      }
+    }
+
+    if (serviceAccountPath) {
+      const serviceAccountRaw = fs.readFileSync(serviceAccountPath, 'utf8');
+      const serviceAccount = JSON.parse(serviceAccountRaw);
+
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        projectId: serviceAccount.project_id || projectId,
+      });
+
+      console.log(`[firebase-admin] Firebase Admin initialized successfully using service account: ${path.relative(process.cwd(), serviceAccountPath)}`);
+      console.log(`[firebase-admin] Firestore initialized successfully for project: ${serviceAccount.project_id || projectId}`);
+    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS)) {
       admin.initializeApp({
         credential: admin.credential.applicationDefault(),
         projectId,
       });
+      console.log('[firebase-admin] Firebase Admin initialized successfully via Application Default Credentials.');
     } else {
-      // Local dev: initialize without credentials (relies on open Firestore rules or emulator)
+      console.error('[firebase-admin] ERROR: Firebase service account could not be loaded from backend/config/firebase.json');
       admin.initializeApp({
         projectId,
       });
     }
-  } catch (err) {
-    console.error('[firebase-admin] Initialization error:', err);
+  } catch (err: any) {
+    console.error('[firebase-admin] Initialization error:', err?.message || err);
   }
 }
 
 export const adminAuth = admin.apps.length > 0 ? admin.auth() : null;
 export const adminDb = admin.apps.length > 0 ? admin.firestore() : null;
-
+export default admin;

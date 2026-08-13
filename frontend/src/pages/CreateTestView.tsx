@@ -5,6 +5,7 @@ import { collection, getDocs, doc, setDoc, serverTimestamp } from 'firebase/fire
 import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
+import { useActionConfirmation } from '../context/ActionConfirmationContext';
 
 
 interface Student {
@@ -43,11 +44,12 @@ interface ParsedImport {
 }
 
 interface CreateTestViewProps {
-  onBack: (tab?: string) => void;
+  onBack: (tab?: string, toastMsg?: string) => void;
 }
 
 export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
   const { currentUser } = useAuth();
+  const { showConfirmation } = useActionConfirmation();
   // Step State: 'details' | 'questions' | 'schedule' | 'review'
   const [step, setStep] = useState<'details' | 'questions' | 'schedule' | 'review'>('details');
   const [saving, setSaving] = useState(false);
@@ -226,13 +228,22 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
       setSaving(true);
       const testId = doc(collection(db, 'tests')).id;
 
+      let derivedDurationMins = 30;
+      if (startDate && startTime && endDate && endTime) {
+        const startMs = new Date(`${startDate}T${startTime}`).getTime();
+        const endMs = new Date(`${endDate}T${endTime}`).getTime();
+        if (!isNaN(startMs) && !isNaN(endMs) && endMs > startMs) {
+          derivedDurationMins = Math.floor((endMs - startMs) / 60000);
+        }
+      }
+
       const testData = {
         id: testId,
         title: testTitle.trim(),
         description: description.trim(),
         category,
         difficulty,
-        duration: parseInt(duration) || 0,
+        duration: derivedDurationMins, // Derived automatically from scheduled start & end datetime
         targetQuestions: parseInt(targetQuestions) || 0,
         targetMarks: parseFloat(targetMarks) || 0,
         passingScore: parseFloat(passingScore) || 0,
@@ -298,11 +309,7 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
   const handleSaveAsDraft = async () => {
     const testId = await saveTestToFirestore('draft');
     if (testId) {
-      setAlertMsg('Test saved as draft successfully!');
-      setTimeout(() => {
-        setAlertMsg(null);
-        onBack('tests');
-      }, 2000);
+      onBack('tests', 'Test added successfully');
     }
   };
 
@@ -763,19 +770,7 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block">Duration (mins)</label>
-                <input
-                  type="number"
-                  required
-                  min="1"
-                  value={duration}
-                  onChange={(e) => setDuration(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#0952cc]/30 font-semibold text-slate-850"
-                />
-              </div>
-
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block">Total Questions</label>
                 <input
@@ -1884,27 +1879,23 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
                     const testId = await saveTestToFirestore('published');
                     if (!testId) return;
 
-                    // Trigger backend publish route for Brevo email notifications
-                    try {
-                      const idToken = await currentUser?.getIdToken();
+                    // Trigger backend publish route asynchronously in background (non-blocking)
+                    currentUser?.getIdToken().then((idToken) => {
                       if (idToken) {
-                        await fetch(`http://localhost:5000/api/tests/${testId}/publish`, {
+                        fetch(`http://localhost:5000/api/tests/${testId}/publish`, {
                           method: 'PATCH',
                           headers: {
                             'Authorization': `Bearer ${idToken}`
                           }
-                        });
+                        }).catch((apiErr) => console.warn('[PublishTest] Background notification API error:', apiErr));
                       }
-                    } catch (apiErr) {
-                      console.warn('[PublishTest] Backend notification API call error:', apiErr);
-                    }
+                    }).catch(() => {});
 
-                    // Success — navigate to Tests tab
-                    setAlertMsg('Test published successfully! Notifications are being processed.');
-                    setTimeout(() => {
-                      setAlertMsg(null);
-                      onBack('tests');
-                    }, 1500);
+                    // Show success confirmation popup
+                    showConfirmation({ message: 'Test added successfully', type: 'success' });
+
+                    // Success — navigate to Tests tab immediately
+                    onBack('tests');
                   }}
                   disabled={saving}
                   className="flex-1 sm:flex-initial px-4 py-2 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white text-[11px] font-bold rounded-lg uppercase tracking-wider text-center focus:outline-none transition-colors disabled:opacity-50"

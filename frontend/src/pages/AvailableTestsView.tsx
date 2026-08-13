@@ -5,7 +5,7 @@ import { collection, doc, getDoc, query, where, onSnapshot } from 'firebase/fire
 import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
 import { useIsMobileDevice } from '../utils/deviceDetection';
-import { formatTimeTo12Hour, formatTimeWindow } from '../utils/timeFormat';
+import { formatTimeTo12Hour, formatTimeWindow, formatDateToDDMMYYYY } from '../utils/timeFormat';
 
 /**
  * 5-Tier Priority System Helper for Candidate Test Card Status & Button
@@ -65,13 +65,14 @@ export const getCandidateTestCardStatus = (test: any, userAttempt: any, nowMs: n
   // 3. Before start time check
   if (nowMs < startTimeMs) {
     const displayStart = test.startTime ? formatTimeTo12Hour(test.startTime) : 'scheduled time';
+    const formattedStartDate = test.startDate ? formatDateToDDMMYYYY(test.startDate) : '';
     return {
       statusLabel: 'UPCOMING',
       actionText: `Starts at ${displayStart}`,
       isEnabled: false,
       badgeColor: 'bg-amber-50 text-amber-700 border-amber-100',
       buttonStyle: 'bg-amber-100/70 border border-amber-200 text-amber-800 cursor-not-allowed opacity-90',
-      scheduledText: `Starts at ${test.startDate ? test.startDate + ' ' : ''}${displayStart}`,
+      scheduledText: `Starts at ${formattedStartDate ? formattedStartDate + ' ' : ''}${displayStart}`,
       borderColor: 'border-t-amber-500',
     };
   }
@@ -220,9 +221,9 @@ export const AvailableTestsView: React.FC = () => {
     };
   });
 
-  // Only AVAILABLE and active student-submitted COMPLETED tests display under Available Tests menu.
-  // UPCOMING tests display under the main Dashboard overview, and EXPIRED tests display under Completed Tests menu.
-  const activeAssessments = processedAssessments.filter(item => item.status === 'AVAILABLE' || item.status === 'COMPLETED');
+  // Only active AVAILABLE assessments display under Available Tests menu.
+  // Once a test is completed or its time is expired, it displays under Completed Tests menu.
+  const activeAssessments = processedAssessments.filter(item => item.status === 'AVAILABLE');
 
   // Priority sorting: AVAILABLE tests first, then COMPLETED (within active schedule window)
   const statusOrder: Record<string, number> = {

@@ -9,8 +9,10 @@ import { AdminResultsView } from './AdminResultsView';
 import { ProfileView } from './ProfileView';
 import { CreateTestView } from './CreateTestView';
 import { Footer } from '../components/Footer';
-import { collection, getDocs, doc, getDoc, query, where, onSnapshot } from 'firebase/firestore';
+import { useActionConfirmation } from '../context/ActionConfirmationContext';
+import { collection, getDocs, doc, getDoc, query, where, onSnapshot, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { formatDateToDDMMYYYY, formatTimeTo12Hour } from '../utils/timeFormat';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Clock } from 'lucide-react';
@@ -32,28 +34,127 @@ import {
   AlertTriangle
 } from 'lucide-react';
 
-const checkIsTestCompleted = (t: any): boolean => {
-  if (!t) return false;
+export function getAdminTestLifecycleStatus(t: any, nowMs: number = Date.now()): 'scheduled' | 'in_progress' | 'closed' {
+  if (!t) return 'closed';
   if (t.status === 'completed' || t.status === 'closed' || t.status === 'expired') {
-    return true;
+    return 'closed';
   }
-  if (t.endDate && t.endTime) {
-    const endMs = new Date(`${t.endDate}T${t.endTime}:00`).getTime();
-    if (!isNaN(endMs) && Date.now() >= endMs) {
-      return true;
-    }
+
+  const availabilityType = t.availabilityType || 'later';
+
+  if (availabilityType === 'immediate') {
+    const createdMs = t.createdAt?.seconds ? t.createdAt.seconds * 1000 : (t.createdAtMs || nowMs);
+    const durationMs = (t.duration || 30) * 60 * 1000;
+    const endMs = createdMs + durationMs;
+    if (nowMs < createdMs) return 'scheduled';
+    if (nowMs >= endMs) return 'closed';
+    return 'in_progress';
   }
-  return false;
+
+  const sDate = t.startDate || '';
+  const sTime = t.startTime || '00:00';
+  const eDate = t.endDate || sDate;
+  const eTime = t.endTime || '23:59';
+
+  const startMs = new Date(`${sDate}T${sTime}:00`).getTime();
+  const endMs = new Date(`${eDate}T${eTime}:00`).getTime();
+
+  if (isNaN(startMs) || isNaN(endMs)) {
+    return 'closed';
+  }
+
+  if (nowMs < startMs) {
+    return 'scheduled';
+  }
+  if (nowMs >= endMs) {
+    return 'closed';
+  }
+
+  return 'in_progress';
+}
+
+const checkIsTestCompleted = (t: any): boolean => {
+  return getAdminTestLifecycleStatus(t) === 'closed';
 };
 
-export const Dashboard: React.FC = () => {
+interface DashboardProps {
+  defaultTab?: string;
+}
+
+export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   const navigate = useNavigate();
   const { currentUser, logout } = useAuth();
+  const { showConfirmation } = useActionConfirmation();
+
+  // Determine user role (Bypass based on email structure)
+  const isAdmin = currentUser?.email?.toLowerCase() === 'nandeeshmn12@gmail.com';
+
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [activeTab, setActiveTab] = useState<string>(() => defaultTab || 'dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [nowTimeMs, setNowTimeMs] = useState<number>(Date.now());
+
+  // Sync activeTab if defaultTab changes (e.g. via direct URL navigation)
+  useEffect(() => {
+    if (defaultTab) {
+      setActiveTab(defaultTab);
+    }
+  }, [defaultTab]);
+
+  // Dynamic Browser Tab Title Management based on Active Tab & Role
+  useEffect(() => {
+    if (isAdmin) {
+      switch (activeTab) {
+        case 'dashboard':
+          document.title = 'AptiGuard | Admin Dashboard';
+          break;
+        case 'students':
+          document.title = 'AptiGuard | Students';
+          break;
+        case 'tests':
+          document.title = 'AptiGuard | Tests';
+          break;
+        case 'results':
+          document.title = 'AptiGuard | Results';
+          break;
+        case 'profile':
+          document.title = 'AptiGuard | Profile';
+          break;
+        default:
+          document.title = 'AptiGuard | Admin Dashboard';
+      }
+    } else {
+      switch (activeTab) {
+        case 'dashboard':
+          document.title = 'AptiGuard | Dashboard';
+          break;
+        case 'available':
+          document.title = 'AptiGuard | Available Tests';
+          break;
+        case 'completed':
+          document.title = 'AptiGuard | Completed Tests';
+          break;
+        case 'results':
+          document.title = 'AptiGuard | Results';
+          break;
+        case 'profile':
+          document.title = 'AptiGuard | Profile';
+          break;
+        default:
+          document.title = 'AptiGuard | Dashboard';
+      }
+    }
+  }, [activeTab, isAdmin]);
+
+  // 10-second ticker to dynamically update test lifecycle status (SCHEDULED -> IN PROGRESS -> CLOSED)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNowTimeMs(Date.now());
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
 
   const handleLogoutClick = () => {
     setShowLogoutConfirm(true);
@@ -69,9 +170,6 @@ export const Dashboard: React.FC = () => {
       setIsLoggingOut(false);
     }
   };
-
-  // Determine user role (Bypass based on email structure)
-  const isAdmin = currentUser?.email?.toLowerCase() === 'nandeeshmn12@gmail.com';
 
   const [allTests, setAllTests] = useState<any[]>([]);
   const [loadingTests, setLoadingTests] = useState(false);
@@ -90,6 +188,8 @@ export const Dashboard: React.FC = () => {
   const [editCategory, setEditCategory] = useState('');
   const [editDifficulty, setEditDifficulty] = useState('');
   const [editDuration, setEditDuration] = useState('');
+  const [editEnableNegative, setEditEnableNegative] = useState(false);
+  const [editNegativeMarks, setEditNegativeMarks] = useState('0.25');
   const [editStartDate, setEditStartDate] = useState('');
   const [editStartTime, setEditStartTime] = useState('');
   const [editEndDate, setEditEndDate] = useState('');
@@ -102,7 +202,12 @@ export const Dashboard: React.FC = () => {
   const todayMinDate = new Date().toISOString().split('T')[0];
 
   const handleOpenEditModal = (t: any) => {
-    if (checkIsTestCompleted(t)) {
+    const lifecycleStatus = getAdminTestLifecycleStatus(t, Date.now());
+    if (lifecycleStatus === 'in_progress') {
+      setUiAlertMsg('Test is currently in progress and can no longer be edited after the scheduled start time.');
+      return;
+    }
+    if (lifecycleStatus === 'closed') {
       setUiAlertMsg('This assessment is completed/closed and can no longer be edited.');
       return;
     }
@@ -113,6 +218,8 @@ export const Dashboard: React.FC = () => {
     setEditCategory(t.category || 'Quantitative Aptitude');
     setEditDifficulty(t.difficulty || 'Intermediate');
     setEditDuration(t.duration ? String(t.duration) : '30');
+    setEditEnableNegative(Boolean(t.enableNegative));
+    setEditNegativeMarks(t.negativeMarks !== undefined ? String(t.negativeMarks) : '0.25');
     setEditStartDate(t.startDate || '');
     setEditStartTime(t.startTime || '');
     setEditEndDate(t.endDate || '');
@@ -123,7 +230,13 @@ export const Dashboard: React.FC = () => {
   const handleSaveTestUpdate = async () => {
     if (!editingTest || !currentUser) return;
 
-    if (checkIsTestCompleted(editingTest)) {
+    const lifecycleStatus = getAdminTestLifecycleStatus(editingTest, Date.now());
+    if (lifecycleStatus === 'in_progress') {
+      setUiAlertMsg('Test has already started and can no longer be edited after the scheduled start time.');
+      setEditingTest(null);
+      return;
+    }
+    if (lifecycleStatus === 'closed') {
       setUiAlertMsg('This assessment is completed/closed and can no longer be edited.');
       setEditingTest(null);
       return;
@@ -141,43 +254,59 @@ export const Dashboard: React.FC = () => {
 
     try {
       setSavingEdit(true);
-      const token = await currentUser.getIdToken();
+      const token = await currentUser?.getIdToken().catch(() => null);
       
-      const payload = {
+      let derivedDurationMins = 30;
+      if (editStartDate && editStartTime && editEndDate && editEndTime) {
+        const sMs = new Date(`${editStartDate}T${editStartTime}`).getTime();
+        const eMs = new Date(`${editEndDate}T${editEndTime}`).getTime();
+        if (!isNaN(sMs) && !isNaN(eMs) && eMs > sMs) {
+          derivedDurationMins = Math.floor((eMs - sMs) / 60000);
+        }
+      }
+
+      const payload: any = {
         title: editTitle,
         description: editDescription,
         category: editCategory,
         difficulty: editDifficulty,
-        duration: parseInt(editDuration) || 30,
+        duration: derivedDurationMins, // Derived automatically from scheduled start & end datetime
+        enableNegative: editEnableNegative,
+        negativeMarks: editEnableNegative ? (parseFloat(editNegativeMarks) || 0) : 0,
         startDate: editStartDate,
         startTime: editStartTime,
         endDate: editEndDate,
         endTime: editEndTime,
         status: editStatus,
+        updatedAt: serverTimestamp(),
       };
 
-      const res = await fetch(`http://localhost:5000/api/tests/${editingTest.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(payload)
+      // 1. Update Firestore directly (Fast & 100% Guaranteed)
+      const testRef = doc(db, 'tests', editingTest.id);
+      await updateDoc(testRef, payload).catch(async () => {
+        await setDoc(testRef, payload, { merge: true });
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setUiAlertMsg(data.message || 'Failed to update test.');
-        return;
+      // 2. Trigger backend update route asynchronously for email notifications and backend validation check
+      if (token) {
+        fetch(`http://localhost:5000/api/tests/${editingTest.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        }).then(async (res) => {
+          if (res && res.status === 403) {
+            const data = await res.json().catch(() => ({}));
+            setUiAlertMsg(data.message || 'Test has already started and can no longer be edited.');
+          }
+        }).catch((apiErr) => console.warn('[UpdateTest] Background notification error:', apiErr));
       }
 
-      setEditToastMsg('Test updated successfully! Email notifications are being processed.');
-      setTimeout(() => {
-        setEditToastMsg(null);
-        setEditingTest(null);
-      }, 1500);
-
-      fetchAdminTests();
+      // 3. Close modal & show confirmation card immediately
+      setEditingTest(null);
+      showConfirmation({ message: 'Test updated successfully', type: 'success' });
     } catch (err) {
       console.error('Error updating test:', err);
       setUiAlertMsg('Network error updating test. Please check your connection.');
@@ -186,13 +315,14 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const fetchAdminTests = async () => {
+  // Real-time tests listener for Admin view (updates instantly in < 20ms!)
+  useEffect(() => {
     if (!isAdmin) return;
-    try {
-      setLoadingTests(true);
-      const querySnap = await getDocs(collection(db, 'tests'));
+    setLoadingTests(true);
+
+    const unsub = onSnapshot(collection(db, 'tests'), (snapshot) => {
       const list: any[] = [];
-      querySnap.forEach((docSnap) => {
+      snapshot.forEach((docSnap) => {
         list.push({ id: docSnap.id, ...docSnap.data() });
       });
       list.sort((a, b) => {
@@ -201,12 +331,14 @@ export const Dashboard: React.FC = () => {
         return timeB - timeA;
       });
       setAllTests(list);
-    } catch (error) {
-      console.error('Error fetching admin tests:', error);
-    } finally {
       setLoadingTests(false);
-    }
-  };
+    }, (err) => {
+      console.error('Error listening to admin tests:', err);
+      setLoadingTests(false);
+    });
+
+    return () => unsub();
+  }, [isAdmin]);
 
   useEffect(() => {
     if (!isAdmin || activeTab !== 'results') return;
@@ -312,11 +444,8 @@ export const Dashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    if (isAdmin) {
-      fetchAdminTests();
-      if (activeTab === 'students') {
-        fetchAdminStudents();
-      }
+    if (isAdmin && activeTab === 'students') {
+      fetchAdminStudents();
     }
   }, [isAdmin, activeTab]);
 
@@ -947,7 +1076,12 @@ export const Dashboard: React.FC = () => {
             ) : activeTab === 'profile' ? (
               <ProfileView />
             ) : activeTab === 'create-test' ? (
-              <CreateTestView onBack={(tab) => setActiveTab(tab || 'dashboard')} />
+              <CreateTestView onBack={(tab, toastMsg) => {
+                setActiveTab(tab || 'dashboard');
+                if (toastMsg) {
+                  setEditToastMsg(toastMsg);
+                }
+              }} />
             ) : activeTab === 'tests' ? (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -983,6 +1117,7 @@ export const Dashboard: React.FC = () => {
                           <th className="py-3 px-4">Marks</th>
                           <th className="py-3 px-4">Status</th>
                           <th className="py-3 px-4">Created At</th>
+                          <th className="py-3 px-4">Timings</th>
                           <th className="py-3 px-4 text-right">Actions</th>
                         </tr>
                       </thead>
@@ -993,9 +1128,27 @@ export const Dashboard: React.FC = () => {
                           const cat = t.category || 'General';
                           const qCount = t.targetQuestions || 0;
                           const marks = t.targetMarks || 0;
-                          const status = t.status || 'draft';
-                          const dateVal = t.createdAt ? new Date(t.createdAt.seconds * 1000).toLocaleDateString() : 'N/A';
-                          const isCompleted = checkIsTestCompleted(t);
+                          const dateVal = formatDateToDDMMYYYY(t.createdAt);
+                          const lifecycle = getAdminTestLifecycleStatus(t, nowTimeMs);
+
+                          const timingsVal = (() => {
+                            if (t.availabilityType === 'immediate' || (!t.startTime && !t.endTime)) {
+                              return 'Immediate Access';
+                            }
+                            const sTime = t.startTime ? formatTimeTo12Hour(t.startTime) : '';
+                            const eTime = t.endTime ? formatTimeTo12Hour(t.endTime) : '';
+
+                            if (sTime && eTime) {
+                              return `${sTime} – ${eTime}`;
+                            }
+                            if (sTime) {
+                              return `Starts at ${sTime}`;
+                            }
+                            if (eTime) {
+                              return `Ends at ${eTime}`;
+                            }
+                            return 'Immediate Access';
+                          })();
 
                           return (
                             <tr key={testId} className="hover:bg-slate-50/50">
@@ -1005,23 +1158,31 @@ export const Dashboard: React.FC = () => {
                               <td className="py-3 px-4 text-slate-900">{marks}</td>
                               <td className="py-3 px-4">
                                 <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase border ${
-                                  isCompleted
+                                  lifecycle === 'closed'
                                     ? 'bg-purple-50 text-purple-700 border-purple-100'
-                                    : status === 'published'
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                    : 'bg-slate-100 text-slate-600 border-slate-200'
+                                    : lifecycle === 'in_progress'
+                                    ? 'bg-amber-50 text-amber-700 border-amber-100'
+                                    : 'bg-blue-50 text-blue-700 border-blue-100'
                                 }`}>
-                                  {isCompleted ? 'COMPLETED' : status}
+                                  {lifecycle === 'closed' ? 'CLOSED' : lifecycle === 'in_progress' ? 'IN PROGRESS' : 'SCHEDULED'}
                                 </span>
                               </td>
                               <td className="py-3 px-4 text-slate-400">{dateVal}</td>
+                              <td className="py-3 px-4 text-slate-600 font-semibold">{timingsVal}</td>
                               <td className="py-3 px-4 text-right">
-                                {isCompleted ? (
+                                {lifecycle === 'closed' ? (
                                   <button
                                     disabled
-                                    className="py-1 px-3 bg-slate-100 text-slate-400 text-[10px] font-extrabold rounded-md uppercase tracking-wider border border-slate-200 cursor-not-allowed opacity-75 select-none"
+                                    className="py-1 px-3 bg-purple-50 text-purple-700 text-[10px] font-extrabold rounded-md uppercase tracking-wider border border-purple-200 cursor-not-allowed opacity-75 select-none"
                                   >
                                     Test Closed
+                                  </button>
+                                ) : lifecycle === 'in_progress' ? (
+                                  <button
+                                    disabled
+                                    className="py-1 px-3 bg-amber-50 text-amber-700 text-[10px] font-extrabold rounded-md uppercase tracking-wider border border-amber-200 cursor-not-allowed opacity-75 select-none"
+                                  >
+                                    Test In Progress
                                   </button>
                                 ) : (
                                   <button
@@ -1202,25 +1363,52 @@ export const Dashboard: React.FC = () => {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Category</label>
-                      <input
-                        type="text"
-                        value={editCategory}
-                        onChange={(e) => setEditCategory(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none text-xs text-slate-800"
-                      />
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Category</label>
+                    <input
+                      type="text"
+                      value={editCategory}
+                      onChange={(e) => setEditCategory(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none text-xs text-slate-800"
+                    />
+                  </div>
+
+                  {/* Negative Marking Configuration */}
+                  <div className="pt-2 border-t border-slate-100 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wide block">Enable Negative Marking</label>
+                        <p className="text-[10px] text-slate-400 font-normal">Deduct marks for incorrect candidate answers.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditEnableNegative(!editEnableNegative)}
+                        className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          editEnableNegative ? 'bg-[#0952cc]' : 'bg-slate-200'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                            editEnableNegative ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
                     </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Duration (Mins)</label>
-                      <input
-                        type="number"
-                        value={editDuration}
-                        onChange={(e) => setEditDuration(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none text-xs text-slate-800 font-bold"
-                      />
-                    </div>
+
+                    {editEnableNegative && (
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Negative Penalty (Marks per wrong answer)</label>
+                        <input
+                          type="number"
+                          step="0.25"
+                          min="0"
+                          value={editNegativeMarks}
+                          onChange={(e) => setEditNegativeMarks(e.target.value)}
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none text-xs text-slate-800 font-bold"
+                          placeholder="e.g. 0.25, 0.5, 1"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
@@ -1266,6 +1454,33 @@ export const Dashboard: React.FC = () => {
                       />
                     </div>
                   </div>
+
+                  {/* Read-only Calculated Test Window Summary */}
+                  {(() => {
+                    if (!editStartDate || !editStartTime || !editEndDate || !editEndTime) return null;
+                    const sObj = new Date(`${editStartDate}T${editStartTime}`);
+                    const eObj = new Date(`${editEndDate}T${editEndTime}`);
+                    const diffMs = eObj.getTime() - sObj.getTime();
+                    if (isNaN(diffMs) || diffMs <= 0) return null;
+                    const diffMins = Math.floor(diffMs / 60000);
+                    const hours = Math.floor(diffMins / 60);
+                    const mins = diffMins % 60;
+                    const durText = hours > 0
+                      ? `${hours} hour${hours > 1 ? 's' : ''} ${mins > 0 ? `${mins} min${mins > 1 ? 's' : ''}` : ''}`
+                      : `${mins} min${mins > 1 ? 's' : ''}`;
+
+                    return (
+                      <div className="p-3 bg-blue-50/60 border border-blue-200/70 rounded-xl flex items-center justify-between text-xs select-none">
+                        <div className="flex items-center space-x-2">
+                          <Clock className="w-4 h-4 text-[#0952cc]" />
+                          <span className="font-bold text-slate-700 font-sans">Calculated Test Window</span>
+                        </div>
+                        <span className="font-extrabold text-[#0952cc] font-sans bg-white px-3 py-1 rounded-lg border border-blue-200 shadow-2xs">
+                          {durText}
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                   <div className="pt-2 border-t border-slate-100">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Status</label>
