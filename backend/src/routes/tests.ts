@@ -155,7 +155,15 @@ const triggerTestUpdateEmailsAsync = async (testId: string, testTitle: string, c
         : ['Assessment configuration or schedule has been updated.'];
 
       const batchStats = await sendBatchTestUpdateEmails(recipients, {
+        testId: testId,
         testTitle: testTitle || currentData.title || 'Assessment',
+        description: currentData.description || '',
+        category: currentData.category || 'General',
+        difficulty: currentData.difficulty || 'Medium',
+        totalQuestions: currentData.totalQuestions || 0,
+        totalMarks: currentData.totalMarks || 0,
+        passingScore: currentData.passingScore || 0,
+        testStatus: currentData.status || 'draft',
         changedDetails: effectiveChanges,
         startDate: currentData.startDate,
         startTime: currentData.startTime,
@@ -371,6 +379,19 @@ router.patch('/:testId/publish', requireAuth, requireAdmin, async (req: AuthRequ
 
     await testDocRef.update(updatePayload);
 
+    // Async trigger Brevo emails for publication
+    try {
+      await triggerTestUpdateEmailsAsync(
+        testId,
+        testData.title || 'Assessment',
+        [`Assessment published and made available (Status: ${targetStatus.toUpperCase()})`],
+        { ...testData, status: targetStatus, totalQuestions, totalMarks }
+      );
+    } catch (emailErr: any) {
+      console.warn('Publish email dispatch warning:', emailErr);
+      // We still return success since the test was successfully published
+    }
+
     res.json({
       success: true,
       message: 'Test published successfully',
@@ -382,14 +403,6 @@ router.patch('/:testId/publish', requireAuth, requireAdmin, async (req: AuthRequ
         totalMarks,
       }
     });
-
-    // Async trigger Brevo emails for publication
-    triggerTestUpdateEmailsAsync(
-      testId,
-      testData.title || 'Assessment',
-      [`Assessment published and made available (Status: ${targetStatus.toUpperCase()})`],
-      { ...testData, status: targetStatus }
-    );
   } catch (error: any) {
     console.error('Publish test error:', error);
     res.status(500).json({ success: false, message: 'Internal server error while publishing test.' });

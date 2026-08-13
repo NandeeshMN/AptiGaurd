@@ -8,20 +8,25 @@ export interface SendOTPEmailOptions {
   otpCode: string;
 }
 
-const formatDateToDDMMYYYY = (dateVal: any): string => {
+const formatDateToLongString = (dateVal: any): string => {
   if (!dateVal) return '';
-  if (typeof dateVal === 'string' && /^\d{2}\/\d{2}\/\d{4}$/.test(dateVal)) return dateVal;
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"];
+  
   if (typeof dateVal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateVal)) {
     const [y, m, d] = dateVal.split('-');
-    return `${d}/${m}/${y}`;
+    const dayNum = parseInt(d, 10);
+    const monthNum = parseInt(m, 10);
+    return `${dayNum} ${monthNames[monthNum - 1]} ${y}`;
   }
+  
   try {
     const d = new Date(dateVal);
     if (isNaN(d.getTime())) return String(dateVal);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = d.getDate();
+    const month = monthNames[d.getMonth()];
     const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
+    return `${day} ${month} ${year}`;
   } catch {
     return String(dateVal);
   }
@@ -162,19 +167,35 @@ export const sendOTPEmail = async ({
 export interface SendTestUpdateEmailOptions {
   recipientEmail: string;
   recipientName: string;
+  testId: string;
   testTitle: string;
+  description?: string;
+  category?: string;
+  difficulty?: string;
+  totalQuestions?: number;
+  totalMarks?: number;
+  passingScore?: number;
+  testStatus?: string;
   changedDetails: string[];
-  startDate?: string;
-  startTime?: string;
-  endDate?: string;
-  endTime?: string;
+  startDate?: string | null;
+  startTime?: string | null;
+  endDate?: string | null;
+  endTime?: string | null;
   duration?: number;
 }
 
 export const sendTestUpdateEmail = async ({
   recipientEmail,
   recipientName,
+  testId,
   testTitle,
+  description,
+  category,
+  difficulty,
+  totalQuestions,
+  totalMarks,
+  passingScore,
+  testStatus,
   changedDetails,
   startDate,
   startTime,
@@ -210,8 +231,8 @@ export const sendTestUpdateEmail = async ({
     ? changedDetails.map(d => `<li style="margin-bottom: 6px;">${d}</li>`).join('')
     : '<li style="margin-bottom: 6px;">Assessment configuration and schedule have been updated.</li>';
 
-  const sDateFormatted = startDate ? formatDateToDDMMYYYY(startDate) : '';
-  const eDateFormatted = endDate ? formatDateToDDMMYYYY(endDate) : sDateFormatted;
+  const sDateFormatted = startDate ? formatDateToLongString(startDate) : '';
+  const eDateFormatted = endDate ? formatDateToLongString(endDate) : sDateFormatted;
   const sTimeFormatted = startTime ? formatTimeTo12Hour(startTime) : '';
   const eTimeFormatted = endTime ? formatTimeTo12Hour(endTime) : '';
 
@@ -282,17 +303,48 @@ export const sendTestUpdateEmail = async ({
               </tr>
             </table>
 
-            <!-- ASSESSMENT & UPDATED INFORMATION CARD -->
+            <!-- ASSESSMENT DETAILS CARD -->
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #0952cc; border-radius: 8px; margin-bottom: 24px;">
               <tr>
                 <td style="padding: 20px 24px; font-family: Arial, Helvetica, sans-serif;">
-                  <div style="font-size: 11px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Assessment</div>
-                  <div style="font-size: 18px; font-weight: 800; color: #031b4e; margin-bottom: 16px;">${testName}</div>
+                  <div style="font-size: 11px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Test Title</div>
+                  <div style="font-size: 18px; font-weight: 800; color: #031b4e; margin-bottom: 12px;">${testName}</div>
                   
-                  <div style="font-size: 12px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Updated Information</div>
-                  <ul style="margin: 0; padding-left: 20px; color: #334155; font-size: 13.5px; line-height: 1.6; font-weight: 600;">
-                    ${changedDetailsHtml}
-                  </ul>
+                  ${description ? `<div style="font-size: 11px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Description</div>
+                  <div style="font-size: 13.5px; font-weight: 600; color: #334155; margin-bottom: 16px;">${description}</div>` : ''}
+                  
+                  <div style="font-size: 12px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">Test Details</div>
+                  
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size: 13.5px; font-weight: 600; color: #334155; line-height: 1.6;">
+                    <tr>
+                      <td width="30%" style="padding-bottom: 6px; color: #64748b;">Category</td>
+                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${category || 'N/A'}</td>
+                    </tr>
+                    <tr>
+                      <td width="30%" style="padding-bottom: 6px; color: #64748b;">Difficulty</td>
+                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${difficulty || 'N/A'}</td>
+                    </tr>
+                    <tr>
+                      <td width="30%" style="padding-bottom: 6px; color: #64748b;">Questions</td>
+                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${totalQuestions || 0}</td>
+                    </tr>
+                    <tr>
+                      <td width="30%" style="padding-bottom: 6px; color: #64748b;">Total Marks</td>
+                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${totalMarks || 0}</td>
+                    </tr>
+                    <tr>
+                      <td width="30%" style="padding-bottom: 6px; color: #64748b;">Duration</td>
+                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${duration ? duration + ' minutes' : 'N/A'}</td>
+                    </tr>
+                    <tr>
+                      <td width="30%" style="padding-bottom: 6px; color: #64748b;">Passing Score</td>
+                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${passingScore || 0}</td>
+                    </tr>
+                    <tr>
+                      <td width="30%" style="padding-bottom: 6px; color: #64748b;">Status</td>
+                      <td width="70%" style="padding-bottom: 6px; color: #0f172a; text-transform: uppercase;">${testStatus || 'Published'}</td>
+                    </tr>
+                  </table>
                 </td>
               </tr>
             </table>
@@ -323,7 +375,7 @@ export const sendTestUpdateEmail = async ({
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 16px; background-color: #eff6ff; border-left: 4px solid #2563eb; border-radius: 4px;">
                     <tr>
                       <td style="padding: 12px 16px; font-family: Arial, Helvetica, sans-serif; font-size: 12.5px; color: #1e3a8a; line-height: 1.5;">
-                        <strong>IMPORTANT:</strong> The assessment is available only within the scheduled assessment window. If you begin the assessment after the scheduled start time, your available time will be limited by the scheduled end time.
+                        <strong>Security Notice:</strong> Start the test within 15 minutes after start time and complete the assessment within the scheduled time and follow the AptiGuard assessment rules.
                       </td>
                     </tr>
                   </table>
@@ -338,7 +390,7 @@ export const sendTestUpdateEmail = async ({
                   <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                     <tr>
                       <td align="center" bgcolor="#0952cc" style="border-radius: 8px;">
-                        <a href="${dashboardUrl}" target="_blank" style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 800; color: #ffffff; text-decoration: none; display: inline-block; padding: 14px 32px; border-radius: 8px; border: 1px solid #0952cc; background-color: #0952cc;">View Assessment Dashboard</a>
+                        <a href="${dashboardUrl}/student/tests/${testId}" target="_blank" style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 800; color: #ffffff; text-decoration: none; display: inline-block; padding: 14px 32px; border-radius: 8px; border: 1px solid #0952cc; background-color: #0952cc;">VIEW ASSESSMENT</a>
                       </td>
                     </tr>
                   </table>
@@ -429,12 +481,20 @@ export const sendTestUpdateEmail = async ({
 export const sendBatchTestUpdateEmails = async (
   recipients: Array<{ email: string; name: string }>,
   testInfo: {
+    testId: string;
     testTitle: string;
+    description?: string;
+    category?: string;
+    difficulty?: string;
+    totalQuestions?: number;
+    totalMarks?: number;
+    passingScore?: number;
+    testStatus?: string;
     changedDetails: string[];
-    startDate?: string;
-    startTime?: string;
-    endDate?: string;
-    endTime?: string;
+    startDate?: string | null;
+    startTime?: string | null;
+    endDate?: string | null;
+    endTime?: string | null;
     duration?: number;
   }
 ): Promise<{ sentCount: number; failedCount: number }> => {
@@ -449,7 +509,15 @@ export const sendBatchTestUpdateEmails = async (
         sendTestUpdateEmail({
           recipientEmail: r.email,
           recipientName: r.name,
+          testId: testInfo.testId,
           testTitle: testInfo.testTitle,
+          description: testInfo.description,
+          category: testInfo.category,
+          difficulty: testInfo.difficulty,
+          totalQuestions: testInfo.totalQuestions,
+          totalMarks: testInfo.totalMarks,
+          passingScore: testInfo.passingScore,
+          testStatus: testInfo.testStatus,
           changedDetails: testInfo.changedDetails,
           startDate: testInfo.startDate,
           startTime: testInfo.startTime,
