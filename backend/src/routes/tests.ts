@@ -100,13 +100,13 @@ const triggerTestUpdateEmailsAsync = async (testId: string, testTitle: string, c
     const recipientsMap = new Map<string, { email: string; name: string }>();
 
     if (assignmentType === 'all') {
-      const usersSnap = await adminDb.collection('users').get();
+      const usersSnap = await adminDb.collection('users').where('role', '==', 'student').get();
       usersSnap.forEach((uDoc) => {
         const u = uDoc.data();
         const rawEmail = u.email ? String(u.email).trim().toLowerCase() : '';
         const role = (u.role || '').toLowerCase();
 
-        if (rawEmail && role !== 'admin' && rawEmail !== 'nandeeshmn12@gmail.com') {
+        if (rawEmail && role === 'student') {
           let rawName = u.name || u.fullName || u.displayName || '';
           if (!rawName || rawName.includes('@')) {
             const prefix = rawEmail.split('@')[0];
@@ -132,7 +132,9 @@ const triggerTestUpdateEmailsAsync = async (testId: string, testTitle: string, c
         if (uSnap.exists) {
           const u = uSnap.data() || {};
           const rawEmail = u.email ? String(u.email).trim().toLowerCase() : '';
-          if (rawEmail) {
+          const role = (u.role || '').toLowerCase();
+          
+          if (rawEmail && role === 'student') {
             let rawName = u.name || u.fullName || u.displayName || '';
             if (!rawName || rawName.includes('@')) {
               const prefix = rawEmail.split('@')[0];
