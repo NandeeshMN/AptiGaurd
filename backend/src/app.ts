@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import testRouter from './routes/tests';
 import authRouter from './routes/auth';
+import adminRouter from './routes/admin';
 
 const app = express();
 
@@ -43,6 +44,7 @@ app.use(express.json());
 // Routes
 app.use('/api/tests', testRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/admin', adminRouter);
 
 // Basic health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {

@@ -8,7 +8,7 @@ import {
   updateProfile,
 } from 'firebase/auth';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp, query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import type { LoginInput, RegisterInput } from '../schemas/authSchemas';
 
@@ -38,36 +38,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Expose register method
   const registerUser = async (data: RegisterInput) => {
-    const userCredential = await createUserWithEmailAndPassword(
-      auth,
-      data.email,
-      data.password
-    );
-    const user = userCredential.user;
+    // 1. Call secure backend registration endpoint
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
 
-    // Update Firebase Auth displayName so currentUser.displayName is immediately populated
-    try {
-      await updateProfile(user, { displayName: data.fullName });
-    } catch (e) {
-      console.warn('Could not update Auth displayName:', e);
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || 'Registration failed');
     }
 
-    // Create a corresponding student document inside users/{uid} collection in Firestore
-    await setDoc(doc(db, 'users', user.uid), {
-      uid: user.uid,
-      name: data.fullName,
-      fullName: data.fullName,
-      email: data.email,
-      role: 'student',
-      status: 'Active',
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    // 2. Automatically log the user in using Firebase Client Auth now that the account exists
+    await signInWithEmailAndPassword(auth, data.email, data.password);
   };
 
   // Expose login method
   const loginUser = async (data: LoginInput) => {
-    await signInWithEmailAndPassword(auth, data.email, data.password);
+    const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
+    const user = userCredential.user;
+    
+    // Check if the user is graduated/archived by querying the canonical authorizedStudents collection
+    const authQuery = query(collection(db, 'authorizedStudents'), where('uid', '==', user.uid));
+    const authSnap = await getDocs(authQuery);
+    
+    if (!authSnap.empty) {
+      const authData = authSnap.docs[0].data();
+      if (authData.status === 'graduated') {
+        await signOut(auth);
+        throw new Error('You are no longer a user of this portal.');
+      }
+    }
   };
 
   // Expose logout method
@@ -82,8 +85,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Sync state with onAuthStateChanged listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const authQuery = query(collection(db, 'authorizedStudents'), where('uid', '==', user.uid));
+          const authSnap = await getDocs(authQuery);
+          if (!authSnap.empty && authSnap.docs[0].data().status === 'graduated') {
+            await signOut(auth);
+            setCurrentUser(null);
+          } else {
+            setCurrentUser(user);
+          }
+        } catch (error) {
+          console.error("Error verifying user status:", error);
+          setCurrentUser(null);
+        }
+      } else {
+        setCurrentUser(null);
+      }
       setLoading(false);
     });
     return unsubscribe;

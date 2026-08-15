@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { adminAuth } from '../config/firebase';
+import { adminAuth, adminDb } from '../config/firebase';
 import { sendOTPEmail } from '../services/brevoService';
 
 const router = Router();
@@ -85,6 +85,94 @@ const handleSendOtpLogic = async (req: Request, res: Response): Promise<void> =>
     message: 'OTP sent to your email address.',
   });
 };
+
+/**
+ * POST /api/auth/register
+ * Register a student by validating UUCMS first and creating user via Firebase Admin.
+ */
+router.post('/register', async (req: Request, res: Response): Promise<void> => {
+  const { fullName, email, password, uucmsNo } = req.body;
+
+  if (!fullName || !email || !password || !uucmsNo) {
+    res.status(400).json({ success: false, message: 'All fields are required.' });
+    return;
+  }
+
+  const sanitizedEmail = email.trim().toLowerCase();
+  const sanitizedUucmsNo = String(uucmsNo).trim();
+
+  if (!adminDb || !adminAuth) {
+    res.status(500).json({ success: false, message: 'Server configuration error.' });
+    return;
+  }
+
+  try {
+    const uucmsRef = adminDb.collection('authorizedStudents').doc(sanitizedUucmsNo);
+    const uucmsSnap = await uucmsRef.get();
+
+    if (!uucmsSnap.exists) {
+      res.status(400).json({ success: false, message: 'Your UUCMS number is not registered. Please contact your administrator.' });
+      return;
+    }
+
+    const authData = uucmsSnap.data();
+
+    if (authData?.status !== 'active') {
+      res.status(400).json({ success: false, message: 'Your UUCMS number is not active. Please contact your administrator.' });
+      return;
+    }
+
+    if (authData?.registered === true) {
+      res.status(400).json({ success: false, message: 'This UUCMS number is already registered.' });
+      return;
+    }
+
+    // Validation passed, create user
+    const userRecord = await adminAuth.createUser({
+      email: sanitizedEmail,
+      password: password,
+      displayName: fullName,
+    });
+
+    const year = authData?.year || '1st Year';
+
+    // Create user profile in Firestore
+    await adminDb.collection('users').doc(userRecord.uid).set({
+      uid: userRecord.uid,
+      name: fullName,
+      fullName: fullName,
+      email: sanitizedEmail,
+      uucmsNo: sanitizedUucmsNo,
+      role: 'student',
+      year: year,
+      status: 'Active',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    // Update authorizedStudent record
+    await uucmsRef.update({
+      registered: true,
+      uid: userRecord.uid,
+      updatedAt: new Date(),
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Account created successfully.',
+    });
+  } catch (error: any) {
+    console.error('Registration error:', error);
+    
+    // Check for Firebase specific errors
+    if (error.code === 'auth/email-already-exists') {
+      res.status(400).json({ success: false, message: 'The email address is already in use by another account.' });
+      return;
+    }
+
+    res.status(500).json({ success: false, message: 'Registration failed. Please try again later.' });
+  }
+});
 
 /**
  * POST /api/auth/send-otp

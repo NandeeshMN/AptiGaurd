@@ -29,6 +29,10 @@ export const getFriendlyErrorMessage = (error: any): string => {
       if (message.toLowerCase().includes('network') || message.toLowerCase().includes('fetch')) {
         return 'Unable to connect. Please check your internet connection and try again.';
       }
+      // If there's no Firebase error code, it's likely a custom error thrown by our backend fetch
+      if (!code && message) {
+        return message;
+      }
       return 'An error occurred during authentication. Please try again.';
   }
 };

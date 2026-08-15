@@ -110,6 +110,16 @@ export const Register: React.FC<RegisterProps> = ({
         </div>
 
         <div className="!mb-2">
+          <AuthInput
+            id="uucmsNo"
+            label="UUCMS Number"
+            placeholder="Enter your university UUCMS number"
+            error={errors.uucmsNo?.message}
+            {...register('uucmsNo')}
+          />
+        </div>
+
+        <div className="!mb-2">
           <PasswordInput
             id="password"
             label="Password"

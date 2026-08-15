@@ -21,6 +21,10 @@ export const registerSchema = z
       .string()
       .min(1, 'Email address is required')
       .email('Please enter a valid email address'),
+    uucmsNo: z
+      .string()
+      .min(1, 'UUCMS number is required')
+      .trim(),
     password: z
       .string()
       .min(1, 'Password is required')
