@@ -647,6 +647,10 @@ router.post('/attempts/:attemptId/submit', requireAuth, async (req: AuthRequest,
     const totalPossibleMarks = testTotalMarks || attemptData.totalMarks || 100;
     const percentage = Math.min(100, Math.max(0, Math.round((finalScore / totalPossibleMarks) * 100 * 100) / 100));
 
+    // Calculate pass/fail status using test passingScore (defaults to 40%)
+    const passingScore = typeof testData.passingScore === 'number' ? testData.passingScore : 40;
+    const passStatus = percentage >= passingScore ? 'PASSED' : 'FAILED';
+
     const finalReason = submissionReason || 'manual_submission';
     const finalStatus = (finalReason === 'manual_submission') ? 'submitted' : 'auto_submitted';
     const finalExitCount = typeof exitCount === 'number' ? exitCount : (attemptData.exitCount || 0);
@@ -663,6 +667,8 @@ router.post('/attempts/:attemptId/submit', requireAuth, async (req: AuthRequest,
       unanswered,
       totalMarks: totalPossibleMarks,
       percentage,
+      passingScore,
+      passStatus,
       updatedAt: submittedAt,
     };
 
