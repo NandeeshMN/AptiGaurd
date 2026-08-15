@@ -12,6 +12,7 @@ interface Student {
   uid: string;
   fullName: string;
   email: string;
+  year?: string;
 }
 
 interface Question {
@@ -100,7 +101,7 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
   const [endDate, setEndDate] = useState('');
   const [endTime, setEndTime] = useState('');
   const [availabilityType, setAvailabilityType] = useState<'immediate' | 'later'>('later');
-  const [assignmentType, setAssignmentType] = useState<'all' | 'selected'>('all');
+  const [assignmentType, setAssignmentType] = useState<'all' | '1st Year' | '2nd Year' | 'selected'>('all');
   
   // Student collection data state
   const [allStudents, setAllStudents] = useState<Student[]>([]);
@@ -285,6 +286,16 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
             assignedAt: serverTimestamp()
           });
         }
+      } else if (assignmentType === '1st Year' || assignmentType === '2nd Year') {
+        const yearStudents = allStudents.filter(s => s.year === assignmentType);
+        for (const student of yearStudents) {
+          await setDoc(doc(db, 'tests', testId, 'assignedStudents', student.uid), {
+            uid: student.uid,
+            fullName: student.fullName,
+            email: student.email,
+            assignedAt: serverTimestamp()
+          });
+        }
       } else {
         for (const student of allStudents) {
           await setDoc(doc(db, 'tests', testId, 'assignedStudents', student.uid), {
@@ -329,11 +340,13 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
       const studentList: Student[] = [];
       querySnap.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data.role === 'student') {
+        // Assuming status !== 'archived' means they are active students
+        if (data.role === 'student' && data.status !== 'archived' && data.status !== 'graduated') {
           studentList.push({
             uid: docSnap.id,
             fullName: data.fullName || 'Unnamed Student',
             email: data.email || '',
+            year: data.year || '1st Year',
           });
         }
       });
@@ -940,24 +953,6 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
                 <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Questions</h3>
                 <p className="text-[11px] text-slate-500 font-medium mt-0.5">Create and manage the questions for this assessment.</p>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleOpenAddQuestion}
-                  className="px-3 py-1.5 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white text-[11px] font-bold rounded-lg uppercase tracking-wider flex items-center space-x-1.5 transition-colors focus:outline-none"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add Question</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowImportModal(true)}
-                  className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-[11px] font-bold rounded-lg uppercase tracking-wider flex items-center space-x-1.5 transition-colors focus:outline-none"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Import Questions</span>
-                </button>
-              </div>
             </div>
 
             {/* Progress Alerts & Warnings */}
@@ -1053,6 +1048,26 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Render Add/Import Question buttons below the list if there are questions */}
+            {questions.length > 0 && (
+              <div className="flex items-center justify-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleOpenAddQuestion}
+                  className="px-4 py-2 border border-[#0952cc] hover:bg-blue-50/50 text-[#0952cc] text-[11px] font-bold rounded-lg uppercase tracking-wider transition-colors focus:outline-none"
+                >
+                  + Add Question
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(true)}
+                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 text-[11px] font-bold rounded-lg uppercase tracking-wider transition-colors focus:outline-none"
+                >
+                  Import Questions
+                </button>
               </div>
             )}
 
@@ -1287,7 +1302,7 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
           {/* Bulk Import Questions Overlay Modal */}
           {showImportModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-              <div className="bg-white w-full max-w-2xl rounded-2xl border border-slate-200/80 p-6 shadow-xl relative my-8 flex flex-col max-h-[85vh]">
+              <div className="bg-white w-full max-w-md rounded-2xl border border-slate-200/80 p-6 shadow-xl relative my-8 flex flex-col max-h-[85vh]">
                 <button
                   type="button"
                   onClick={() => { setShowImportModal(false); setParsedRows([]); setFileName(''); setImportError(null); }}
@@ -1327,31 +1342,33 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
                     </button>
                   </div>
 
-                  <div
+                  <label
                     onDragEnter={handleDrag}
                     onDragOver={handleDrag}
                     onDragLeave={handleDrag}
                     onDrop={handleDrop}
+                    htmlFor="import-file-input"
                     className={`border-2 border-dashed rounded-xl p-8 text-center flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${
                       dragActive ? 'border-[#0952cc] bg-blue-50/20' : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
                     <Upload className="w-8 h-8 text-slate-400" />
-                    <div className="space-y-1 mt-1 text-xs">
+                    <div className="space-y-1 mt-1 text-xs pointer-events-none">
                       <p className="font-bold text-slate-700">Drag & drop your file here</p>
                       <p className="font-semibold text-slate-400">or</p>
-                      <label className="inline-block px-3 py-1 bg-slate-100 hover:bg-slate-200 active:bg-slate-350 text-slate-700 text-[10px] font-bold rounded-lg uppercase tracking-wide cursor-pointer transition-colors">
+                      <span className="inline-block px-3 py-1 bg-slate-100 text-slate-700 text-[10px] font-bold rounded-lg uppercase tracking-wide transition-colors">
                         Browse Files
-                        <input
-                          type="file"
-                          accept=".xlsx,.csv"
-                          onChange={handleFileChange}
-                          className="hidden"
-                        />
-                      </label>
+                      </span>
                     </div>
-                    <p className="text-[9px] text-slate-450 font-bold uppercase tracking-wider mt-1">.xlsx and .csv supported</p>
-                  </div>
+                    <p className="text-[9px] text-slate-450 font-bold uppercase tracking-wider mt-1 pointer-events-none">.xlsx and .csv supported</p>
+                    <input
+                      id="import-file-input"
+                      type="file"
+                      accept=".xlsx,.csv"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                  </label>
 
                   {fileName && (
                     <div className="px-3 py-2 bg-slate-50 rounded-lg flex items-center justify-between text-xs font-bold text-slate-700">
@@ -1634,6 +1651,38 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
               </label>
 
               <label className={`p-4 border rounded-xl flex items-start space-x-3 cursor-pointer transition-all ${
+                assignmentType === '1st Year' ? 'border-[#0952cc] bg-blue-50/10' : 'border-slate-200 hover:bg-slate-50'
+              }`}>
+                <input
+                  type="radio"
+                  name="assignment"
+                  checked={assignmentType === '1st Year'}
+                  onChange={() => setAssignmentType('1st Year')}
+                  className="mt-0.5 w-4.5 h-4.5 text-[#0952cc] focus:ring-[#0952cc]/20 cursor-pointer"
+                />
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800">1st Year Students</h4>
+                  <p className="text-[10px] text-slate-450 font-medium mt-0.5">Automatically assign to all currently enrolled 1st Year students.</p>
+                </div>
+              </label>
+
+              <label className={`p-4 border rounded-xl flex items-start space-x-3 cursor-pointer transition-all ${
+                assignmentType === '2nd Year' ? 'border-[#0952cc] bg-blue-50/10' : 'border-slate-200 hover:bg-slate-50'
+              }`}>
+                <input
+                  type="radio"
+                  name="assignment"
+                  checked={assignmentType === '2nd Year'}
+                  onChange={() => setAssignmentType('2nd Year')}
+                  className="mt-0.5 w-4.5 h-4.5 text-[#0952cc] focus:ring-[#0952cc]/20 cursor-pointer"
+                />
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800">2nd Year Students</h4>
+                  <p className="text-[10px] text-slate-450 font-medium mt-0.5">Automatically assign to all currently enrolled 2nd Year students.</p>
+                </div>
+              </label>
+
+              <label className={`p-4 border rounded-xl flex items-start space-x-3 cursor-pointer transition-all ${
                 assignmentType === 'selected' ? 'border-[#0952cc] bg-blue-50/10' : 'border-slate-200 hover:bg-slate-50'
               }`}>
                 <input
@@ -1702,9 +1751,14 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
                             onChange={() => handleToggleSelectStudent(student.uid)}
                             className="w-4.5 h-4.5 rounded text-[#0952cc] border-slate-350 focus:ring-[#0952cc]/20 cursor-pointer"
                           />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-bold text-slate-800 truncate">{student.fullName}</p>
-                            <p className="text-[10px] text-slate-450 font-semibold truncate mt-0.5">{student.email}</p>
+                          <div className="min-w-0 flex-1 flex justify-between items-center">
+                            <div>
+                              <p className="text-xs font-bold text-slate-800 truncate">{student.fullName}</p>
+                              <p className="text-[10px] text-slate-450 font-semibold truncate mt-0.5">{student.email}</p>
+                            </div>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600">
+                              {student.year || '1st Year'}
+                            </span>
                           </div>
                         </label>
                       ))}
