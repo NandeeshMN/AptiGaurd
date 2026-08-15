@@ -7,14 +7,15 @@ import { AvailableTestsView, getCandidateTestCardStatus } from './AvailableTests
 import { CompletedTestsView } from './CompletedTestsView';
 import { ResultsView } from './ResultsView';
 import { AdminResultsView } from './AdminResultsView';
+import { AdminStudentsView } from './AdminStudentsView';
 import { ProfileView } from './ProfileView';
 import { CreateTestView } from './CreateTestView';
 import { Footer } from '../components/Footer';
 import { useActionConfirmation } from '../context/ActionConfirmationContext';
-import { collection, getDocs, doc, getDoc, query, where, onSnapshot, updateDoc, setDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, query, where, onSnapshot, updateDoc, setDoc, serverTimestamp, writeBatch, getCountFromServer, limit, orderBy } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { formatDateToDDMMYYYY, formatTimeTo12Hour } from '../utils/timeFormat';
-import { Clock } from 'lucide-react';
+import { Clock, Activity, CalendarDays, Radio, ArrowRight } from 'lucide-react';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -30,11 +31,13 @@ import {
   Search,
   CheckCheck,
   AlertTriangle,
-  Trash2
+  Trash2,
+  FileEdit
 } from 'lucide-react';
 
-export function getAdminTestLifecycleStatus(t: any, nowMs: number = Date.now()): 'scheduled' | 'in_progress' | 'closed' {
+export function getAdminTestLifecycleStatus(t: any, nowMs: number = Date.now()): 'draft' | 'scheduled' | 'in_progress' | 'closed' {
   if (!t) return 'closed';
+  if (t.status === 'draft') return 'draft';
   if (t.status === 'completed' || t.status === 'closed' || t.status === 'expired') {
     return 'closed';
   }
@@ -72,6 +75,87 @@ export function getAdminTestLifecycleStatus(t: any, nowMs: number = Date.now()):
   return 'in_progress';
 }
 
+const AdminTestOverviewCard: React.FC<{ test: any, onManage: (id: string) => void, onView: (id: string) => void, onMonitor: (id: string) => void }> = ({ test, onManage, onView, onMonitor }) => {
+  const [assignedCount, setAssignedCount] = React.useState<number>(0);
+  const [startedCount, setStartedCount] = React.useState<number>(0);
+  const lifecycle = getAdminTestLifecycleStatus(test);
+
+  React.useEffect(() => {
+    let active = true;
+    const fetchCounts = async () => {
+      try {
+        if (test.assignmentType === 'all') {
+          // It's assigned to all, so we can't easily get the count without fetching users, we'll handle this in UI
+        } else {
+          const assignSnap = await getCountFromServer(collection(db, 'tests', test.id, 'assignedStudents'));
+          if (active) setAssignedCount(assignSnap.data().count);
+        }
+
+        const q = query(collection(db, 'testAttempts'), where('testId', '==', test.id));
+        const startedSnap = await getCountFromServer(q);
+        if (active) setStartedCount(startedSnap.data().count);
+      } catch (err) {
+        console.warn('Failed to fetch counts for overview card', err);
+      }
+    };
+    fetchCounts();
+    return () => { active = false; };
+  }, [test.id, test.assignmentType]);
+
+  const sDate = test.startDate ? formatDateToDDMMYYYY(test.startDate) : 'Today';
+  const sTime = test.startTime ? formatTimeTo12Hour(test.startTime) : '';
+  const eTime = test.endTime ? formatTimeTo12Hour(test.endTime) : '';
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col space-y-4">
+      <div className="flex items-start justify-between">
+        <div>
+          <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wider border ${
+            lifecycle === 'in_progress' ? 'bg-red-50 text-red-700 border-red-100' : 'bg-amber-50 text-amber-700 border-amber-100'
+          }`}>
+            {lifecycle === 'in_progress' ? 'LIVE NOW' : 'SCHEDULED'}
+          </span>
+          <h4 className="text-sm font-extrabold text-slate-900 mt-2">{test.title || 'Untitled Assessment'}</h4>
+        </div>
+        {lifecycle === 'in_progress' && (
+          <span className="relative flex h-3 w-3">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+          </span>
+        )}
+      </div>
+
+      <div className="text-xs font-semibold text-slate-500">
+        <p>{test.targetQuestions || 0} Questions • {test.targetMarks || 0} Marks • {test.duration || 30} Minutes</p>
+        <p className="mt-1">
+          {sDate}{sTime ? `, ${sTime}` : ''}{eTime ? ` – ${eTime}` : ''}
+        </p>
+        <p className="mt-2 text-slate-700 font-bold">
+          {test.assignmentType === 'all' ? (
+            `${startedCount} started`
+          ) : (
+            lifecycle === 'in_progress' ? `${startedCount} / ${assignedCount} students started` : `${assignedCount} Students Assigned`
+          )}
+        </p>
+      </div>
+
+      <div className="flex items-center space-x-3 pt-2">
+        {lifecycle === 'in_progress' ? (
+          <button onClick={() => onMonitor(test.id)} className="flex-1 py-2 bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-extrabold rounded-lg uppercase tracking-wider transition-colors border border-red-200">
+            Monitor
+          </button>
+        ) : (
+          <button onClick={() => onView(test.id)} className="flex-1 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 text-[10px] font-extrabold rounded-lg uppercase tracking-wider transition-colors border border-slate-200">
+            View
+          </button>
+        )}
+        <button onClick={() => onManage(test.id)} className="flex-1 py-2 bg-white hover:bg-slate-50 text-slate-700 text-[10px] font-extrabold rounded-lg uppercase tracking-wider transition-colors border border-slate-200">
+          Manage
+        </button>
+      </div>
+    </div>
+  );
+}
 
 interface DashboardProps {
   defaultTab?: string;
@@ -258,6 +342,71 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [studentsSearch, setStudentsSearch] = useState('');
 
+  const [recentResults, setRecentResults] = useState<any[]>([]);
+  const [loadingRecentResults, setLoadingRecentResults] = useState(false);
+
+  useEffect(() => {
+    if (!isAdmin || activeTab !== 'dashboard') return;
+    setLoadingRecentResults(true);
+    // No orderBy/limit here to avoid composite index requirement — sort client-side
+    const q = query(
+      collection(db, 'testAttempts'),
+      where('status', 'in', ['submitted', 'auto_submitted'])
+    );
+    const unsub = onSnapshot(q, async (snap) => {
+      const results: any[] = [];
+      const userUids = new Set<string>();
+
+      snap.forEach(docSnap => {
+        const data = docSnap.data();
+        results.push({ id: docSnap.id, ...data });
+        if (data.userId) userUids.add(data.userId);
+      });
+
+      // Sort by submittedAt descending client-side, take top 5
+      results.sort((a, b) => {
+        const aMs = a.submittedAt?.seconds ? a.submittedAt.seconds * 1000 : (a.submittedAt || 0);
+        const bMs = b.submittedAt?.seconds ? b.submittedAt.seconds * 1000 : (b.submittedAt || 0);
+        return bMs - aMs;
+      });
+      const top5 = results.slice(0, 5);
+
+      // Resolve user names
+      const userCache: Record<string, string> = {};
+      if (userUids.size > 0) {
+        for (const uid of Array.from(userUids)) {
+          const s = studentsList.find(st => st.uid === uid);
+          if (s) {
+            userCache[uid] = s.fullName || 'Unknown Student';
+          } else {
+            const uSnap = await getDoc(doc(db, 'users', uid));
+            if (uSnap.exists()) {
+              userCache[uid] = uSnap.data().fullName || 'Unknown Student';
+            }
+          }
+        }
+      }
+
+      const finalResults = top5.map(r => {
+        const test = allTests.find(t => t.id === r.testId);
+        const passing = typeof r.passingScore === 'number' ? r.passingScore : (test?.passingScore !== undefined ? test.passingScore : 40);
+        return {
+          ...r,
+          passingScore: passing,
+          studentName: r.candidateName || userCache[r.userId] || 'Unknown Student'
+        };
+      });
+
+      setRecentResults(finalResults);
+      setLoadingRecentResults(false);
+    }, (err) => {
+      console.error('Error fetching recent results:', err);
+      setLoadingRecentResults(false);
+    });
+
+    return () => unsub();
+  }, [isAdmin, activeTab, studentsList]);
+
   // Edit Test modal state
   const [editingTest, setEditingTest] = useState<any | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -275,6 +424,58 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   const [savingEdit, setSavingEdit] = useState(false);
   const [editToastMsg, setEditToastMsg] = useState<string | null>(null);
   const [uiAlertMsg, setUiAlertMsg] = useState<string | null>(null);
+
+  // Draft deletion state
+  const [deleteDraftId, setDeleteDraftId] = useState<string | null>(null);
+  const [deleteDraftTitle, setDeleteDraftTitle] = useState<string>('');
+  const [isDeletingDraft, setIsDeletingDraft] = useState(false);
+  const [deleteToastMsg, setDeleteToastMsg] = useState<string | null>(null);
+  // IDs being deleted — used to hide them from UI immediately while Firestore listener catches up
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(new Set());
+
+  const handleDeleteDraft = async () => {
+    if (!deleteDraftId || isDeletingDraft) return;
+    const idToDelete = deleteDraftId;
+    setIsDeletingDraft(true);
+    // Hide from UI immediately — the onSnapshot listener may take a moment to catch up
+    setPendingDeleteIds(prev => new Set([...Array.from(prev), idToDelete]));
+    setDeleteDraftId(null);
+    setDeleteDraftTitle('');
+    try {
+      const token = await currentUser?.getIdToken();
+      const res = await fetch(`http://localhost:5000/api/tests/${idToDelete}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || 'Failed to delete draft.');
+      }
+      // Also directly remove from local state so UI is instant
+      setAllTests(prev => prev.filter(t => t.id !== idToDelete));
+      setDeleteToastMsg('Test deleted successfully.');
+      setTimeout(() => setDeleteToastMsg(null), 3000);
+    } catch (err: any) {
+      // Deletion failed — restore the item in the UI
+      setPendingDeleteIds(prev => {
+        const next = new Set(Array.from(prev));
+        next.delete(idToDelete);
+        return next;
+      });
+      setUiAlertMsg(err.message || 'Failed to delete draft test. Please try again.');
+    } finally {
+      setIsDeletingDraft(false);
+      // After Firestore confirms deletion via listener, clean up the pending set
+      setTimeout(() => {
+        setPendingDeleteIds(prev => {
+          const next = new Set(Array.from(prev));
+          next.delete(idToDelete);
+          return next;
+        });
+      }, 5000);
+    }
+  };
+
 
   const todayMinDate = new Date().toISOString().split('T')[0];
 
@@ -410,6 +611,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     const unsub = onSnapshot(collection(db, 'tests'), (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((docSnap) => {
+        // Skip tests that are currently being deleted
+        if (pendingDeleteIds.has(docSnap.id)) return;
         list.push({ id: docSnap.id, ...docSnap.data() });
       });
       list.sort((a, b) => {
@@ -425,7 +628,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     });
 
     return () => unsub();
-  }, [isAdmin]);
+  }, [isAdmin, pendingDeleteIds]);
 
 
 
@@ -620,14 +823,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
               </div>
             </div>
 
-            {/* Sidebar prominent Create Button */}
-            <button
-              onClick={() => setActiveTab('create-test')}
-              className="w-full mb-6 py-2.5 px-4 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white font-semibold text-xs rounded-lg flex items-center justify-center space-x-2 transition-colors duration-255 shadow-xs focus:outline-none uppercase tracking-wider"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Create New Test</span>
-            </button>
+
 
             {/* Navigation links */}
             <nav className="space-y-1">
@@ -650,6 +846,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
               >
                 <ClipboardList className="w-4.5 h-4.5" />
                 <span>Tests</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('drafts')}
+                className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all duration-200 ${activeTab === 'drafts'
+                    ? 'bg-blue-50 text-[#0952cc]'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+              >
+                <FileEdit className="w-4.5 h-4.5" />
+                <span>Drafts</span>
               </button>
               <button
                 onClick={() => setActiveTab('students')}
@@ -746,6 +952,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                   <span>Tests</span>
                 </button>
                 <button
+                  onClick={() => { setActiveTab('drafts'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold ${activeTab === 'drafts' ? 'bg-blue-50 text-[#0952cc]' : 'text-slate-600'
+                    }`}
+                >
+                  <FileEdit className="w-4.5 h-4.5" />
+                  <span>Drafts</span>
+                </button>
+                <button
                   onClick={() => { setActiveTab('students'); setIsMobileMenuOpen(false); }}
                   className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold ${activeTab === 'students' ? 'bg-blue-50 text-[#0952cc]' : 'text-slate-600'
                     }`}
@@ -791,137 +1005,197 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
         {/* 2. MAIN CONTENT WRAPPER */}
         <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
 
-          {/* Header row (Desktop Search & actions) */}
-          <header className="bg-white border-b border-slate-200/80 px-6 py-4 flex items-center justify-between flex-shrink-0 z-35 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
-            <div className="flex items-center space-x-3">
-              <button
-                onClick={() => setIsMobileMenuOpen(true)}
-                className="md:hidden p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 focus:outline-none"
-              >
-                <Menu className="w-6 h-6" />
-              </button>
-
-              {/* Search bar widget */}
-              <div className="relative w-64 md:w-80">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="Search..."
-                  className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-xs bg-slate-50/50 focus:outline-none focus:bg-white focus:ring-1 focus:ring-[#0952cc]/30 transition-all"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-4">
-              <button className="p-2 rounded-lg text-slate-400 hover:bg-slate-50 relative focus:outline-none">
-                <Bell className="w-5 h-5" />
-                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full" />
-              </button>
-              <div className="w-9 h-9 rounded-full bg-[#031b4e] text-white flex items-center justify-center text-xs font-extrabold shadow-sm">
-                A
-              </div>
-            </div>
-          </header>
+          {/* Mobile hamburger only */}
+          <div className="md:hidden px-4 pt-4 flex-shrink-0">
+            <button
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 focus:outline-none"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+          </div>
 
           {/* Inner Content Area */}
           <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 max-w-[1200px] w-full mx-auto space-y-6">
 
-            {/* Greeting */}
-            <div>
-              <h2 className="text-xl font-extrabold text-slate-900 leading-tight">Welcome back, Admin 👋</h2>
-              <p className="text-xs text-slate-500 font-medium">Ready to monitor and manage college assessments?</p>
-            </div>
 
             {/* Dynamic Admin Subview Router */}
             {activeTab === 'dashboard' ? (
-              <>
-                {/* Quick Actions Buttons Row */}
-                <div className="flex flex-wrap gap-3">
-                  <button className="px-4 py-2 bg-[#0952cc] hover:bg-[#0747a6] text-white text-[11px] font-bold rounded-lg uppercase tracking-wider shadow-xs focus:outline-none" onClick={() => setActiveTab('create-test')}>
-                    Create Test
-                  </button>
-                  <button className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-[11px] font-bold rounded-lg uppercase tracking-wider shadow-xs focus:outline-none" onClick={() => setActiveTab('tests')}>
-                    Manage Tests
-                  </button>
-                  <button className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-[11px] font-bold rounded-lg uppercase tracking-wider shadow-xs focus:outline-none" onClick={() => setActiveTab('results')}>
-                    View Results
-                  </button>
+              <div className="space-y-8">
+                {/* Greeting — only shown on Dashboard tab */}
+                <div>
+                  <h2 className="text-2xl font-extrabold text-slate-900 leading-tight">Welcome back, Admin 👋</h2>
+                  <p className="text-sm text-slate-500 font-medium">Monitor and manage your college assessments.</p>
                 </div>
 
-                {/* Content Splits */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Statistics Row */}
+                {(() => {
+                  const draftCount = allTests.filter(t => t.status === 'draft').length;
+                  const scheduledCount = allTests.filter(t => getAdminTestLifecycleStatus(t, nowTimeMs) === 'scheduled' && t.status !== 'draft').length;
+                  const liveCount = allTests.filter(t => getAdminTestLifecycleStatus(t, nowTimeMs) === 'in_progress' && t.status !== 'draft').length;
+                  const completedCount = allTests.filter(t => getAdminTestLifecycleStatus(t, nowTimeMs) === 'closed' && t.status !== 'draft').length;
 
-                  {/* Left 2 columns: Tests table log */}
+                  return (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs">
+                        <div className="flex items-center space-x-2 text-slate-500 mb-2">
+                          <FileEdit className="w-4 h-4" />
+                          <h4 className="text-[10px] font-extrabold uppercase tracking-widest">Draft Tests</h4>
+                        </div>
+                        <p className="text-2xl font-black text-slate-800">{draftCount}</p>
+                      </div>
+                      <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs">
+                        <div className="flex items-center space-x-2 text-amber-500 mb-2">
+                          <CalendarDays className="w-4 h-4" />
+                          <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-amber-700">Scheduled</h4>
+                        </div>
+                        <p className="text-2xl font-black text-amber-700">{scheduledCount}</p>
+                      </div>
+                      <div className="bg-white rounded-xl border border-red-100 p-5 shadow-xs bg-red-50/30">
+                        <div className="flex items-center space-x-2 text-red-500 mb-2">
+                          <Activity className="w-4 h-4" />
+                          <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-red-700">Live Now</h4>
+                        </div>
+                        <p className="text-2xl font-black text-red-700">{liveCount}</p>
+                      </div>
+                      <div className="bg-white rounded-xl border border-emerald-100 p-5 shadow-xs bg-emerald-50/30">
+                        <div className="flex items-center space-x-2 text-emerald-500 mb-2">
+                          <CheckCheck className="w-4 h-4" />
+                          <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-700">Completed</h4>
+                        </div>
+                        <p className="text-2xl font-black text-emerald-700">{completedCount}</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Main 2-column layout */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  
+                  {/* LEFT: Live & Upcoming Assessments */}
                   <div className="lg:col-span-2 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Recent Tests</h3>
+                    <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+                      <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Live &amp; Upcoming Assessments</h3>
                     </div>
 
                     {loadingTests ? (
-                      <div className="text-center py-6 text-xs font-semibold text-slate-400">Loading recent tests...</div>
-                    ) : allTests.length === 0 ? (
-                      <div className="bg-white rounded-xl border border-slate-200/80 p-8 text-center text-slate-500 font-semibold shadow-xs">
-                        No tests created yet.
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {allTests.slice(0, 5).map((t) => (
-                          <div key={t.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex items-center justify-between">
-                            <div>
-                              <h4 className="text-xs font-bold text-slate-900">{t.title || 'Untitled Assessment'}</h4>
-                              <p className="text-[10px] text-slate-500 font-semibold mt-1">
-                                {t.category || 'General'} &middot; {t.difficulty || 'Intermediate'} &middot; {t.duration || 0} mins
-                              </p>
-                            </div>
-                            <span className={`px-2 py-0.5 rounded text-[8px] font-extrabold uppercase border ${t.status === 'published'
-                                ? 'bg-emerald-50 text-emerald-750 border-emerald-100'
-                                : 'bg-slate-100 text-slate-600 border-slate-200'
-                              }`}>
-                              {t.status}
-                            </span>
+                      <div className="text-center py-6 text-xs font-semibold text-slate-400">Loading assessments...</div>
+                    ) : (() => {
+                      const liveAndUpcoming = allTests.filter(t => {
+                        const s = getAdminTestLifecycleStatus(t, nowTimeMs);
+                        return (s === 'in_progress' || s === 'scheduled') && t.status !== 'draft';
+                      }).sort((a, b) => {
+                        const aLive = getAdminTestLifecycleStatus(a, nowTimeMs) === 'in_progress';
+                        const bLive = getAdminTestLifecycleStatus(b, nowTimeMs) === 'in_progress';
+                        if (aLive && !bLive) return -1;
+                        if (!aLive && bLive) return 1;
+                        const aDate = a.startDate ? new Date(`${a.startDate}T${a.startTime || '00:00'}:00`).getTime() : 0;
+                        const bDate = b.startDate ? new Date(`${b.startDate}T${b.startTime || '00:00'}:00`).getTime() : 0;
+                        return aDate - bDate;
+                      });
+
+                      if (liveAndUpcoming.length === 0) {
+                        return (
+                          <div className="bg-white rounded-xl border border-slate-200/80 p-8 text-center text-slate-500 font-semibold shadow-xs">
+                            No live or upcoming assessments right now.
                           </div>
-                        ))}
-                      </div>
-                    )}
+                        );
+                      }
+
+                      return (
+                        <div className="grid grid-cols-1 gap-4">
+                          {liveAndUpcoming.map(t => (
+                            <AdminTestOverviewCard 
+                              key={t.id} 
+                              test={t} 
+                              onManage={(id) => {
+                                setEditingTest(t);
+                                setActiveTab('create-test');
+                              }}
+                              onView={(id) => setActiveTab('tests')}
+                              onMonitor={(id) => setActiveTab('results')}
+                            />
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
 
-                  {/* Right column sidebar widgets */}
-                  <div className="space-y-6">
-
-                    {/* Activity Feed log stream */}
-                    <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs space-y-4">
-                      <h4 className="text-xs font-extrabold text-[#031b4e] uppercase tracking-wide">Recent Activity</h4>
-
-                      {/* Empty state placeholder ready for real Firestore activity */}
-                      <div className="text-center text-slate-400 py-6 text-xs font-semibold">
-                        No recent activity.
+                  {/* RIGHT: Quick Actions & Activity */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+                      <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Quick Actions</h3>
+                    </div>
+                    <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-xs">
+                      <div className="space-y-2">
+                        <button onClick={() => setActiveTab('create-test')} className="w-full flex items-center justify-center space-x-2 px-3 py-2.5 rounded-lg text-xs font-bold text-white bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] border border-[#0952cc] transition-colors shadow-xs focus:outline-none uppercase tracking-wider">
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Create New Test</span>
+                        </button>
+                        <button onClick={() => setActiveTab('tests')} className="w-full text-left px-3 py-2.5 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-50 border border-slate-100 flex items-center justify-between transition-colors">
+                          <span>Manage Tests</span>
+                        </button>
+                        <button onClick={() => setActiveTab('students')} className="w-full text-left px-3 py-2.5 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-50 border border-slate-100 flex items-center justify-between transition-colors">
+                          <span>Manage Students</span>
+                        </button>
+                        <button onClick={() => setActiveTab('results')} className="w-full text-left px-3 py-2.5 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-50 border border-slate-100 flex items-center justify-between transition-colors">
+                          <span>View Results</span>
+                        </button>
                       </div>
                     </div>
-
-                    {/* Clear Data Action Card */}
-                    <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs space-y-3">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center border border-red-100 flex-shrink-0">
-                          <Trash2 className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <h4 className="text-xs font-bold text-slate-900">Clear Data</h4>
-                          <p className="text-[10px] text-slate-500 font-medium">Delete candidate submissions &amp; attempt logs</p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowClearDataModal(true)}
-                        className="w-full py-2 bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-bold rounded-lg uppercase tracking-wider transition-colors border border-red-200 focus:outline-none cursor-pointer"
-                      >
-                        Clear Data
-                      </button>
-                    </div>
-
                   </div>
-
                 </div>
-              </>
+
+                {/* BOTTOM: Recent Results */}
+                <div className="space-y-4 pt-4">
+                  <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+                    <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Recent Results</h3>
+                  </div>
+
+                  {loadingRecentResults ? (
+                    <div className="text-center py-6 text-xs font-semibold text-slate-400">Loading recent results...</div>
+                  ) : recentResults.length === 0 ? (
+                    <div className="bg-white rounded-xl border border-slate-200/80 p-8 text-center text-slate-500 font-semibold shadow-xs">
+                      No results available yet.
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+                      <table className="w-full text-left border-collapse text-xs font-semibold">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 font-extrabold text-slate-455 tracking-wider uppercase text-[10px]">
+                            <th className="py-3 px-4">Student Name</th>
+                            <th className="py-3 px-4">Test Name</th>
+                            <th className="py-3 px-4 text-center">Score</th>
+                            <th className="py-3 px-4 text-center">Percentage</th>
+                            <th className="py-3 px-4 text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {recentResults.map(r => {
+                            const percent = r.totalMarks > 0 ? Math.round((r.score / r.totalMarks) * 100) : 0;
+                            const isPass = percent >= (r.passingScore !== undefined ? r.passingScore : 40);
+                            return (
+                              <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="py-3 px-4 text-slate-900 font-bold">{r.studentName}</td>
+                                <td className="py-3 px-4 text-slate-500">{r.testTitle || 'Unknown Test'}</td>
+                                <td className="py-3 px-4 text-center text-slate-900">{r.score} / {r.totalMarks}</td>
+                                <td className="py-3 px-4 text-center text-slate-900">{percent}%</td>
+                                <td className="py-3 px-4 text-right">
+                                  <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase border ${
+                                    isPass ? 'bg-emerald-50 text-emerald-750 border-emerald-100' : 'bg-red-50 text-red-700 border-red-100'
+                                  }`}>
+                                    {isPass ? 'Passed' : 'Failed'}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
             ) : activeTab === 'profile' ? (
               <ProfileView />
             ) : activeTab === 'create-test' ? (
@@ -931,50 +1205,56 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                   setEditToastMsg(toastMsg);
                 }
               }} />
-            ) : activeTab === 'tests' ? (
+            ) : (activeTab === 'tests' || activeTab === 'drafts') ? (
               <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Manage Tests</h3>
-                    <p className="text-xs text-slate-500 font-medium">Create, publish, and monitor your test assessments.</p>
-                  </div>
-                  <button
-                    onClick={() => setActiveTab('create-test')}
-                    className="py-2 px-4 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white font-semibold text-xs rounded-lg flex items-center space-x-2 transition-colors focus:outline-none uppercase tracking-wider"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>Create New Test</span>
-                  </button>
+                <div>
+                  <h3 className="text-xl font-extrabold text-[#031b4e] uppercase tracking-wide">
+                    {activeTab === 'drafts' ? 'Manage Drafts' : 'Manage Tests'}
+                  </h3>
+                  <p className="text-sm text-slate-500 font-medium">
+                    {activeTab === 'drafts' ? 'View and edit your saved test drafts.' : 'Create, publish, and monitor your test assessments.'}
+                  </p>
                 </div>
 
-                {loadingTests ? (
-                  <div className="text-center py-12 text-xs text-slate-500 font-semibold">
-                    Loading tests...
-                  </div>
-                ) : allTests.length === 0 ? (
-                  <div className="bg-white rounded-xl border border-slate-200/80 p-8 text-center text-slate-500 font-semibold shadow-xs">
-                    No tests created yet. Click "Create New Test" to get started.
-                  </div>
-                ) : (
-                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-                    <table className="w-full text-left border-collapse text-xs font-semibold">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 font-extrabold text-slate-455 tracking-wider uppercase text-[10px]">
-                          <th className="py-3 px-4">Title</th>
-                          <th className="py-3 px-4">Category</th>
-                          <th className="py-3 px-4">Questions</th>
-                          <th className="py-3 px-4">Marks</th>
-                          <th className="py-3 px-4">Status</th>
-                          <th className="py-3 px-4">Created At</th>
-                          <th className="py-3 px-4">Timings</th>
-                          <th className="py-3 px-4 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {allTests.map((t) => {
-                          const testId = t.id || 'N/A';
-                          const title = t.title || 'Untitled Assessment';
-                          const cat = t.category || 'General';
+                {(() => {
+                  const filteredTests = allTests.filter(t => activeTab === 'drafts' ? t.status === 'draft' : t.status !== 'draft');
+                  
+                  if (loadingTests) {
+                    return (
+                      <div className="text-center py-12 text-xs text-slate-500 font-semibold">
+                        Loading {activeTab}...
+                      </div>
+                    );
+                  }
+                  
+                  if (filteredTests.length === 0) {
+                    return (
+                      <div className="bg-white rounded-xl border border-slate-200/80 p-8 text-center text-slate-500 font-semibold shadow-xs">
+                        {activeTab === 'drafts' ? 'No drafts saved yet.' : 'No active tests created yet. Click "Create New Test" to get started.'}
+                      </div>
+                    );
+                  }
+                  
+                  return (
+                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+                      <table className="w-full text-left border-collapse text-xs font-semibold">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 font-extrabold text-slate-455 tracking-wider uppercase text-[10px]">
+                            <th className="py-3 px-4">Title</th>
+                            <th className="py-3 px-4">Category</th>
+                            <th className="py-3 px-4">Questions</th>
+                            <th className="py-3 px-4">Marks</th>
+                            <th className="py-3 px-4">Status</th>
+                            <th className="py-3 px-4">Created At</th>
+                            <th className="py-3 px-4">Timings</th>
+                            <th className="py-3 px-4 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {filteredTests.map((t) => {
+                            const testId = t.id || 'N/A';
+                            const title = t.title || 'Untitled Assessment';
+                            const cat = t.category || 'General';
                           const qCount = t.targetQuestions || 0;
                           const marks = t.targetMarks || 0;
                           const dateVal = formatDateToDDMMYYYY(t.createdAt);
@@ -998,131 +1278,87 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                             }
                             return 'Immediate Access';
                           })();
-
-                          return (
-                            <tr key={testId} className="hover:bg-slate-50/50">
-                              <td className="py-3 px-4 text-slate-900 font-bold">{title}</td>
-                              <td className="py-3 px-4 text-slate-500">{cat}</td>
-                              <td className="py-3 px-4 text-slate-900">{qCount}</td>
-                              <td className="py-3 px-4 text-slate-900">{marks}</td>
-                              <td className="py-3 px-4">
-                                <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase border ${
-                                  lifecycle === 'closed'
-                                    ? 'bg-purple-50 text-purple-700 border-purple-100'
-                                    : lifecycle === 'in_progress'
-                                    ? 'bg-amber-50 text-amber-700 border-amber-100'
-                                    : 'bg-blue-50 text-blue-700 border-blue-100'
-                                }`}>
-                                  {lifecycle === 'closed' ? 'CLOSED' : lifecycle === 'in_progress' ? 'IN PROGRESS' : 'SCHEDULED'}
-                                </span>
-                              </td>
-                              <td className="py-3 px-4 text-slate-400">{dateVal}</td>
-                              <td className="py-3 px-4 text-slate-600 font-semibold">{timingsVal}</td>
-                              <td className="py-3 px-4 text-right">
-                                {lifecycle === 'closed' ? (
-                                  <button
-                                    disabled
-                                    className="py-1 px-3 bg-purple-50 text-purple-700 text-[10px] font-extrabold rounded-md uppercase tracking-wider border border-purple-200 cursor-not-allowed opacity-75 select-none"
-                                  >
-                                    Test Closed
-                                  </button>
-                                ) : lifecycle === 'in_progress' ? (
-                                  <button
-                                    disabled
-                                    className="py-1 px-3 bg-amber-50 text-amber-700 text-[10px] font-extrabold rounded-md uppercase tracking-wider border border-amber-200 cursor-not-allowed opacity-75 select-none"
-                                  >
-                                    Test In Progress
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={() => handleOpenEditModal(t)}
-                                    className="py-1 px-3 bg-blue-50 hover:bg-blue-100 text-[#0952cc] text-[10px] font-extrabold rounded-md uppercase tracking-wider transition-colors border border-blue-200 cursor-pointer shadow-2xs"
-                                  >
-                                    Edit Test
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                            return (
+                              <tr key={testId} className="hover:bg-slate-50/50">
+                                <td className="py-3 px-4 text-slate-900 font-bold">{title}</td>
+                                <td className="py-3 px-4 text-slate-500">{cat}</td>
+                                <td className="py-3 px-4 text-slate-900">{qCount}</td>
+                                <td className="py-3 px-4 text-slate-900">{marks}</td>
+                                <td className="py-3 px-4">
+                                  <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase border ${
+                                    lifecycle === 'closed'
+                                      ? 'bg-purple-50 text-purple-700 border-purple-100'
+                                      : lifecycle === 'in_progress'
+                                      ? 'bg-amber-50 text-amber-700 border-amber-100'
+                                      : lifecycle === 'draft'
+                                      ? 'bg-slate-50 text-slate-700 border-slate-200'
+                                      : 'bg-blue-50 text-blue-700 border-blue-100'
+                                  }`}>
+                                    {lifecycle === 'closed' ? 'CLOSED' : lifecycle === 'in_progress' ? 'IN PROGRESS' : lifecycle === 'draft' ? 'DRAFT' : 'SCHEDULED'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-slate-400">{dateVal}</td>
+                                <td className="py-3 px-4 text-slate-600 font-semibold">{timingsVal}</td>
+                                <td className="py-3 px-4 text-right">
+                                  {lifecycle === 'closed' ? (
+                                    <button
+                                      disabled
+                                      className="py-1 px-3 bg-purple-50 text-purple-700 text-[10px] font-extrabold rounded-md uppercase tracking-wider border border-purple-200 cursor-not-allowed opacity-75 select-none"
+                                    >
+                                      Test Closed
+                                    </button>
+                                  ) : lifecycle === 'draft' ? (
+                                    <div className="flex items-center justify-end space-x-2">
+                                      <button
+                                        onClick={() => {
+                                          setActiveTab('create-test');
+                                          // Note: actual editing requires passing data to CreateTestView 
+                                        }}
+                                        className="p-1.5 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-md transition-colors focus:outline-none"
+                                        title="Edit Draft"
+                                      >
+                                        <FileEdit className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setDeleteDraftId(testId);
+                                          setDeleteDraftTitle(title);
+                                        }}
+                                        className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-md transition-colors focus:outline-none"
+                                        title="Delete Draft"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  ) : lifecycle === 'in_progress' ? (
+                                    <button
+                                      disabled
+                                      className="py-1 px-3 bg-amber-50 text-amber-700 text-[10px] font-extrabold rounded-md uppercase tracking-wider border border-amber-200 cursor-not-allowed opacity-75 select-none"
+                                    >
+                                      Test In Progress
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleOpenEditModal(t)}
+                                      className="py-1 px-3 bg-blue-50 hover:bg-blue-100 text-[#0952cc] text-[10px] font-extrabold rounded-md uppercase tracking-wider transition-colors border border-blue-200 cursor-pointer shadow-2xs"
+                                    >
+                                      Edit Test
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
               </div>
             ) : activeTab === 'results' ? (
               <AdminResultsView />
             ) : activeTab === 'students' ? (
-              <div className="space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Registered Student Candidates</h3>
-                    <p className="text-xs text-slate-500 font-medium">Manage all registered candidates and track their exam participation.</p>
-                  </div>
-
-                  <div className="relative flex-1 max-w-xs">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      placeholder="Search student by name or email..."
-                      value={studentsSearch}
-                      onChange={(e) => setStudentsSearch(e.target.value)}
-                      className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#0952cc]/30 transition-all"
-                    />
-                  </div>
-                </div>
-
-                {loadingStudents ? (
-                  <div className="text-center py-12 text-xs text-slate-500 font-semibold">
-                    Loading registered students...
-                  </div>
-                ) : filteredStudents.length === 0 ? (
-                  <div className="bg-white rounded-xl border border-slate-200/80 p-8 text-center text-slate-500 font-semibold shadow-xs">
-                    No registered students found matching your search.
-                  </div>
-                ) : (
-                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-                    <table className="w-full text-left border-collapse text-xs font-semibold">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 font-extrabold text-slate-500 tracking-wider uppercase text-[10px]">
-                          <th className="py-3 px-4">Student Name</th>
-                          <th className="py-3 px-4">Email</th>
-                          <th className="py-3 px-4">Registered On</th>
-                          <th className="py-3 px-4">Status</th>
-                          <th className="py-3 px-4">Test Attempts</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {filteredStudents.map((st) => {
-                          const name = st.name || st.fullName || st.email?.split('@')[0] || 'Candidate Student';
-                          const email = st.email || 'N/A';
-                          const dateVal = st.createdAt?.seconds
-                            ? new Date(st.createdAt.seconds * 1000).toLocaleDateString()
-                            : (st.createdAt ? new Date(st.createdAt).toLocaleDateString() : 'Active');
-                          const status = st.status || 'Active';
-                          const attemptsCount = st.testAttemptsCount || 0;
-
-                          return (
-                            <tr key={st.uid || st.id || email} className="hover:bg-slate-50/50">
-                              <td className="py-3 px-4 text-slate-900 font-bold">{name}</td>
-                              <td className="py-3 px-4 text-slate-500 font-medium">{email}</td>
-                              <td className="py-3 px-4 text-slate-400">{dateVal}</td>
-                              <td className="py-3 px-4">
-                                <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase border bg-emerald-50 text-emerald-700 border-emerald-100">
-                                  {status}
-                                </span>
-                              </td>
-                              <td className="py-3 px-4 text-[#0952cc] font-bold">
-                                {attemptsCount} Attempt{attemptsCount !== 1 ? 's' : ''}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+              <AdminStudentsView />
             ) : activeTab === 'profile' ? (
               <ProfileView isAdmin={true} />
             ) : (
@@ -1169,6 +1405,51 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* DELETE DRAFT CONFIRMATION MODAL */}
+        {deleteDraftId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
+            <div className="bg-white w-full max-w-sm rounded-2xl border border-slate-200/80 p-6 shadow-xl text-center space-y-5">
+              <div className="w-12 h-12 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto border border-red-100">
+                <Trash2 className="w-5 h-5" />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-base font-bold text-slate-900 uppercase tracking-wide">Delete Test?</h3>
+                <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                  This action will permanently delete<br />
+                  <span className="font-bold text-slate-800">"{deleteDraftTitle}"</span><br />
+                  and all its associated questions.
+                </p>
+                <p className="text-[11px] text-red-500 font-semibold">This action cannot be undone.</p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => { setDeleteDraftId(null); setDeleteDraftTitle(''); }}
+                  disabled={isDeletingDraft}
+                  className="flex-1 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg uppercase tracking-wide focus:outline-none transition-colors disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteDraft}
+                  disabled={isDeletingDraft}
+                  className="flex-1 py-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xs font-bold rounded-lg uppercase tracking-wide focus:outline-none transition-colors disabled:opacity-60"
+                >
+                  {isDeletingDraft ? 'Deleting...' : 'Delete Test'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DELETE DRAFT SUCCESS TOAST */}
+        {deleteToastMsg && (
+          <div className="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white text-xs font-bold px-5 py-3 rounded-xl shadow-lg animate-in fade-in slide-in-from-bottom-2">
+            {deleteToastMsg}
           </div>
         )}
 
@@ -1617,220 +1898,302 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
             >
               <HelpCircle className="w-5 h-5" />
             </button>
-            <Bell className="w-5 h-5 text-slate-400 cursor-pointer" />
-            <div className="w-8 h-8 rounded-full bg-[#031b4e] text-white flex items-center justify-center text-xs font-bold">
-              {initials}
-            </div>
           </div>
         </header>
 
         {/* Inner Content Area */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 max-w-[1200px] w-full mx-auto">
 
-          {/* Top Header Row (Desktop Layout) */}
-          <div className="hidden md:flex items-center justify-between mb-8">
-            <div>
-              <h2 className="text-xl font-extrabold text-slate-900 leading-tight">
-                Good evening, {studentName.split(' ')[0]} 👋
-              </h2>
-              <p className="text-xs text-slate-500 font-medium">Ready for your next aptitude challenge?</p>
-            </div>
-            <div className="flex items-center space-x-4">
-              <button className="p-2 rounded-lg bg-white border border-slate-200/80 hover:bg-slate-50 text-slate-500 shadow-sm relative focus:outline-none">
-                <Bell className="w-4.5 h-4.5" />
-                <span className="absolute top-1 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full" />
-              </button>
-              <button
-                onClick={() => setShowHelpModal(true)}
-                className="p-2 rounded-lg bg-white border border-slate-200/80 hover:bg-slate-50 text-slate-500 shadow-sm focus:outline-none"
-              >
-                <HelpCircle className="w-4.5 h-4.5" />
-              </button>
-              <div className="w-9 h-9 rounded-full bg-[#031b4e] text-white flex items-center justify-center text-xs font-bold shadow-sm">
-                {initials}
-              </div>
-            </div>
-          </div>
+
 
           {/* Dynamic Subview Router */}
           {activeTab === 'dashboard' ? (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Left Column widgets */}
-              <div className="lg:col-span-2 space-y-6">
+            <div className="space-y-6">
+              {/* Header Greeting */}
+              <div>
+                <h2 className="text-2xl font-extrabold text-slate-900 leading-tight">
+                  Welcome back, {studentName} 👋
+                </h2>
+                <p className="text-sm text-slate-500 font-medium">
+                  Stay updated with your aptitude assessments.
+                </p>
+              </div>
 
-                {loadingStudentTests ? (
-                  <div className="bg-white rounded-xl border border-slate-200/80 p-8 text-center text-slate-400 text-xs font-semibold shadow-xs">
-                    Loading your assessments...
-                  </div>
-                ) : (
-                  <>
-                    {/* Process student tests with 5-tier priority system */}
-                    {(() => {
-                      const processed = studentTests.map((t) => {
-                        const att = studentUserAttemptsMap.get(t.id);
-                        const cardStatus = getCandidateTestCardStatus(t, att, studentNowMs);
-                        return {
-                          ...t,
-                          cardStatus,
-                        };
-                      });
+              {loadingStudentTests ? (
+                <div className="bg-white rounded-xl border border-slate-200/80 p-8 text-center text-slate-400 text-xs font-semibold shadow-xs">
+                  Loading your assessments...
+                </div>
+              ) : (() => {
+                const processed = studentTests.map((t) => {
+                  const att = studentUserAttemptsMap.get(t.id);
+                  const cardStatus = getCandidateTestCardStatus(t, att, studentNowMs);
+                  let startTimeMs = 0;
+                  if (t.availabilityType === 'immediate') {
+                    const createdMs = t.createdAt?.seconds ? t.createdAt.seconds * 1000 : (t.createdAtMs || Date.now());
+                    startTimeMs = createdMs;
+                  } else {
+                    const sDate = t.startDate || '';
+                    const sTime = t.startTime || '00:00';
+                    const startMs = new Date(`${sDate}T${sTime}:00`).getTime();
+                    startTimeMs = isNaN(startMs) ? 0 : startMs;
+                  }
+                  return { ...t, cardStatus, startTimeMs };
+                });
 
-                      const upcomingList = processed.filter((p) => p.cardStatus.statusLabel === 'UPCOMING');
-                      const availableList = processed.filter((p) => p.cardStatus.statusLabel === 'AVAILABLE');
-                      const completedList = processed.filter((p) => p.cardStatus.statusLabel === 'COMPLETED' || p.cardStatus.statusLabel === 'EXPIRED');
+                // Find Next Assessment (AVAILABLE or UPCOMING)
+                const nextAssessment = processed
+                  .filter(p => p.cardStatus.statusLabel === 'AVAILABLE' || p.cardStatus.statusLabel === 'UPCOMING')
+                  .sort((a, b) => {
+                    if (a.cardStatus.statusLabel === 'AVAILABLE' && b.cardStatus.statusLabel === 'UPCOMING') return -1;
+                    if (a.cardStatus.statusLabel === 'UPCOMING' && b.cardStatus.statusLabel === 'AVAILABLE') return 1;
+                    return a.startTimeMs - b.startTimeMs;
+                  })[0];
 
-                      return (
-                        <>
-                          {/* Upcoming Tests */}
-                          <div className="space-y-3">
-                            <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Upcoming Tests</h3>
+                // Upcoming Assessments (excluding nextAssessment, showing max 3)
+                const upcomingAssessmentsList = processed
+                  .filter(p => p.cardStatus.statusLabel === 'UPCOMING' && p.id !== nextAssessment?.id)
+                  .sort((a, b) => a.startTimeMs - b.startTimeMs)
+                  .slice(0, 3);
 
-                            {upcomingList.length === 0 ? (
-                              <div className="bg-white rounded-xl border border-slate-200/80 p-6 text-center text-slate-400 text-xs font-semibold shadow-xs">
-                                No upcoming assessments.
+                // Recent Results (max 3 completed attempts)
+                const completedAttempts = Array.from(studentUserAttemptsMap.values())
+                  .filter(att => att.status === 'submitted' || att.status === 'auto_submitted')
+                  .sort((a, b) => {
+                    const aTime = a.submittedAt?.seconds || 0;
+                    const bTime = b.submittedAt?.seconds || 0;
+                    return bTime - aTime;
+                  })
+                  .slice(0, 3);
+
+                // Recent Activity Feed logic
+                const activities: { id: string; text: string; timeMs: number }[] = [];
+                studentTests.forEach(test => {
+                  const createdMs = test.createdAt?.seconds 
+                    ? test.createdAt.seconds * 1000 
+                    : (test.createdAtMs || (test.startDate ? new Date(`${test.startDate}T${test.startTime || '00:00'}:00`).getTime() : 0));
+                  
+                  if (createdMs && createdMs < Date.now()) {
+                    activities.push({
+                      id: `assigned-${test.id}`,
+                      text: `✓ ${test.title || 'Assessment'} assigned`,
+                      timeMs: createdMs
+                    });
+                  }
+
+                  const att = studentUserAttemptsMap.get(test.id);
+                  if (att) {
+                    if (att.startedAt) {
+                      const startedMs = att.startedAt.seconds ? att.startedAt.seconds * 1000 : att.startedAt;
+                      if (startedMs) {
+                        activities.push({
+                          id: `started-${test.id}`,
+                          text: `✓ ${test.title || 'Assessment'} started`,
+                          timeMs: startedMs
+                        });
+                      }
+                    }
+                    if (att.status === 'submitted' || att.status === 'auto_submitted') {
+                      const submittedMs = att.submittedAt?.seconds ? att.submittedAt.seconds * 1000 : (att.submittedAt || 0);
+                      if (submittedMs) {
+                        activities.push({
+                          id: `completed-${test.id}`,
+                          text: `✓ ${test.title || 'Assessment'} completed`,
+                          timeMs: submittedMs
+                        });
+                        activities.push({
+                          id: `published-${test.id}`,
+                          text: `✓ Result published for ${test.title || 'Assessment'}`,
+                          timeMs: submittedMs + 1000
+                        });
+                      }
+                    }
+                  }
+                });
+
+                const sortedActivities = activities
+                  .sort((a, b) => b.timeMs - a.timeMs)
+                  .slice(0, 5);
+
+                const getRelativeTime = (timestampMs: number) => {
+                  const diff = Date.now() - timestampMs;
+                  const mins = Math.floor(diff / 60000);
+                  if (mins < 1) return 'Just now';
+                  if (mins < 60) return `${mins} min${mins > 1 ? 's' : ''} ago`;
+                  const hours = Math.floor(mins / 60);
+                  if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+                  const days = Math.floor(hours / 24);
+                  if (days === 1) return 'Yesterday';
+                  return `${days} days ago`;
+                };
+
+                return (
+                  <div className="space-y-6">
+                    {/* Prominent NEXT ASSESSMENT Section */}
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-extrabold text-slate-500 uppercase tracking-widest">Next Assessment</h3>
+                      {nextAssessment ? (
+                        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs relative overflow-hidden flex flex-col gap-4">
+                          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                            <div className="space-y-2 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase border ${nextAssessment.cardStatus.badgeColor}`}>
+                                  {nextAssessment.cardStatus.statusLabel}
+                                </span>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                  {nextAssessment.category || 'General'}
+                                </span>
+                                <span className="text-slate-300 font-normal">&bull;</span>
+                                <span className="text-[10px] font-semibold text-slate-500">
+                                  {nextAssessment.difficulty || 'Intermediate'}
+                                </span>
                               </div>
-                            ) : (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                {upcomingList.map((test) => (
-                                  <div key={test.id} className="bg-white rounded-xl border border-t-4 border-slate-200/80 border-t-amber-500 shadow-xs hover:shadow-md transition-all duration-200 p-4 flex flex-col gap-3">
-                                    <div className="flex items-start justify-between gap-2">
-                                      <h4 className="text-xs font-bold text-slate-900 leading-snug flex-1">{test.title || 'Untitled'}</h4>
-                                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-extrabold uppercase border flex-shrink-0 ${test.cardStatus.badgeColor}`}>
-                                        {test.cardStatus.statusLabel}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center gap-3 text-[10px] font-semibold text-slate-500">
-                                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{test.duration || 0} mins</span>
-                                      <span>&bull; {test.targetQuestions || 0} Qs</span>
-                                      <span>&bull; {test.targetMarks || 0} marks</span>
-                                    </div>
-                                    <p className="text-[10px] text-amber-700 font-bold truncate">{test.cardStatus.scheduledText}</p>
-                                    <button
-                                      disabled={!test.cardStatus.isEnabled}
-                                      onClick={() => test.cardStatus.isEnabled && navigate('/test/' + test.id)}
-                                      className={`w-full py-2 text-[10px] font-bold rounded-lg uppercase tracking-wider transition-colors focus:outline-none ${test.cardStatus.buttonStyle}`}
-                                    >
-                                      {test.cardStatus.actionText}
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Available Tests */}
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                              <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Available Tests</h3>
-                              <button className="text-xs font-bold text-[#0952cc] hover:underline cursor-pointer" onClick={() => setActiveTab('available')}>View All &rarr;</button>
+                              <h4 className="text-lg font-black text-slate-900 leading-snug">
+                                {nextAssessment.title || 'Untitled Assessment'}
+                              </h4>
                             </div>
 
-                            {availableList.length === 0 ? (
-                              <div className="bg-white rounded-xl border border-slate-200/80 p-6 text-center text-slate-400 text-xs font-semibold shadow-xs">
-                                No tests available right now.
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                {availableList.map((test) => (
-                                  <div key={test.id} className="bg-white rounded-xl border border-t-4 border-slate-200/80 border-t-[#0952cc] shadow-xs hover:shadow-md transition-all duration-200 p-4 flex flex-col gap-3">
-                                    <div className="flex items-start justify-between gap-2">
-                                      <h4 className="text-xs font-bold text-slate-900 leading-snug flex-1">{test.title || 'Untitled'}</h4>
-                                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-extrabold uppercase border flex-shrink-0 ${test.cardStatus.badgeColor}`}>
-                                        {test.cardStatus.statusLabel}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center gap-3 text-[10px] font-semibold text-slate-500">
-                                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{test.duration || 0} mins</span>
-                                      <span>&bull; {test.targetQuestions || 0} Qs</span>
-                                      <span>&bull; {test.targetMarks || 0} marks</span>
-                                    </div>
-                                    <button
-                                      disabled={!test.cardStatus.isEnabled}
-                                      onClick={() => test.cardStatus.isEnabled && navigate('/test/' + test.id)}
-                                      className={`w-full py-2 text-[10px] font-bold rounded-lg uppercase tracking-wider transition-colors focus:outline-none ${test.cardStatus.buttonStyle}`}
-                                    >
-                                      {test.cardStatus.actionText}
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                            <div className="flex flex-wrap sm:flex-nowrap items-center gap-4 text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5">
+                              <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-slate-400" /> {nextAssessment.duration || 0} mins</span>
+                              <span className="text-slate-300 font-normal">&bull;</span>
+                              <span>{nextAssessment.targetQuestions || 0} Qs</span>
+                              <span className="text-slate-300 font-normal">&bull;</span>
+                              <span>{nextAssessment.targetMarks || 0} Marks</span>
+                            </div>
                           </div>
 
-                          {/* Completed / Past Tests */}
+                          <div className="border-t border-slate-100 pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                              <CalendarDays className="w-4 h-4 text-slate-400" />
+                              <span>
+                                {nextAssessment.availabilityType === 'immediate'
+                                  ? 'Available Immediately'
+                                  : `${nextAssessment.startDate ? formatDateToDDMMYYYY(nextAssessment.startDate) : ''} at ${nextAssessment.startTime ? formatTimeTo12Hour(nextAssessment.startTime) : '00:00'}`}
+                              </span>
+                            </div>
+                            <button
+                              disabled={!nextAssessment.cardStatus.isEnabled}
+                              onClick={() => nextAssessment.cardStatus.isEnabled && navigate('/test/' + nextAssessment.id)}
+                              className={`py-2.5 px-6 text-xs font-bold rounded-xl uppercase tracking-wider transition-all focus:outline-none ${nextAssessment.cardStatus.buttonStyle}`}
+                            >
+                              {nextAssessment.cardStatus.actionText}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-white rounded-2xl border border-slate-200/80 p-8 text-center text-slate-500 shadow-xs">
+                          <h4 className="text-xs font-bold text-slate-800 mb-1">No upcoming assessments</h4>
+                          <p className="text-[11px] text-slate-400 font-semibold">New assessments assigned to you will appear here.</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Two-column section */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      
+                      {/* LEFT: Upcoming Assessments */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
+                          <h3 className="text-xs font-extrabold text-slate-500 uppercase tracking-widest">Upcoming Assessments</h3>
+                        </div>
+
+                        <div className="space-y-3">
+                          {upcomingAssessmentsList.length === 0 ? (
+                            <div className="bg-white rounded-xl border border-slate-200/80 p-6 text-center text-slate-400 text-xs font-semibold shadow-xs">
+                              No upcoming assessments.
+                            </div>
+                          ) : (
+                            upcomingAssessmentsList.map(test => (
+                              <div key={test.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex items-center justify-between gap-4">
+                                <div className="space-y-1.5">
+                                  <h4 className="text-xs font-bold text-slate-900 leading-snug">{test.title}</h4>
+                                  <div className="flex items-center gap-2 text-[10px] font-semibold text-slate-500">
+                                    <span>{test.startDate ? formatDateToDDMMYYYY(test.startDate) : ''}</span>
+                                    <span>&bull;</span>
+                                    <span>{test.startTime ? formatTimeTo12Hour(test.startTime) : '00:00'}</span>
+                                  </div>
+                                </div>
+                                <button
+                                  onClick={() => setActiveTab('available')}
+                                  className="py-1.5 px-4 border border-slate-200 hover:bg-slate-50 text-slate-700 text-[10px] font-bold rounded-lg uppercase tracking-wider focus:outline-none transition-colors"
+                                >
+                                  View
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      {/* RIGHT: Recent Results */}
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
+                          <h3 className="text-xs font-extrabold text-slate-500 uppercase tracking-widest">Recent Results</h3>
+                        </div>
+
+                        <div className="space-y-3">
+                          {completedAttempts.length === 0 ? (
+                            <div className="bg-white rounded-xl border border-slate-200/80 p-6 text-center text-slate-400 text-xs font-semibold shadow-xs">
+                              No results available yet.
+                            </div>
+                          ) : (
+                            completedAttempts.map(att => {
+                              const test = studentTests.find(t => t.id === att.testId);
+                              const title = test?.title || att.testTitle || 'Untitled Assessment';
+                              const percent = att.totalMarks > 0 ? Math.round((att.score / att.totalMarks) * 100) : 0;
+                              const passing = typeof att.passingScore === 'number' ? att.passingScore : (test?.passingScore !== undefined ? test.passingScore : 40);
+                              const isPass = percent >= passing;
+
+                              return (
+                                <div key={att.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex items-center justify-between gap-4">
+                                  <div className="space-y-1">
+                                    <h4 className="text-xs font-bold text-slate-900 leading-snug">{title}</h4>
+                                    <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
+                                      <span>{att.score} / {att.totalMarks} Marks</span>
+                                      <span>&bull;</span>
+                                      <span>{percent}%</span>
+                                    </div>
+                                  </div>
+                                  <span className={`px-2 py-0.5 rounded text-[9px] font-extrabold uppercase border ${
+                                    isPass ? 'bg-emerald-50 text-emerald-750 border-emerald-100' : 'bg-red-50 text-red-700 border-red-100'
+                                  }`}>
+                                    {isPass ? 'Passed' : 'Failed'}
+                                  </span>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* Recent Activity */}
+                    <div className="space-y-4">
+                      <div className="border-b border-slate-200/80 pb-2.5">
+                        <h3 className="text-xs font-extrabold text-slate-500 uppercase tracking-widest">Recent Activity</h3>
+                      </div>
+
+                      <div className="bg-white rounded-xl border border-slate-200/80 p-4 shadow-xs space-y-3">
+                        {sortedActivities.length === 0 ? (
+                          <div className="text-center text-slate-400 py-4 text-xs font-semibold">
+                            No recent activity.
+                          </div>
+                        ) : (
                           <div className="space-y-3">
-                            <h3 className="text-sm font-extrabold text-[#031b4e] uppercase tracking-wide">Completed / Past Tests</h3>
-
-                            {completedList.length === 0 ? (
-                              <div className="bg-white rounded-xl border border-slate-200/80 p-6 text-center text-slate-400 text-xs font-semibold shadow-xs">
-                                No completed assessments yet.
+                            {sortedActivities.map(act => (
+                              <div key={act.id} className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                                <span>{act.text}</span>
+                                <span className="text-[10px] text-slate-400">{getRelativeTime(act.timeMs)}</span>
                               </div>
-                            ) : (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                {completedList.map((test) => (
-                                  <div key={test.id} className="bg-white rounded-xl border border-t-4 border-slate-200/80 border-t-slate-400 shadow-xs hover:shadow-md transition-all duration-200 p-4 flex flex-col gap-3 opacity-80">
-                                    <div className="flex items-start justify-between gap-2">
-                                      <h4 className="text-xs font-bold text-slate-900 leading-snug flex-1">{test.title || 'Untitled'}</h4>
-                                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-extrabold uppercase border flex-shrink-0 ${test.cardStatus.badgeColor}`}>
-                                        {test.cardStatus.statusLabel}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center gap-3 text-[10px] font-semibold text-slate-500">
-                                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{test.duration || 0} mins</span>
-                                      <span>&bull; {test.targetQuestions || 0} Qs</span>
-                                      <span>&bull; {test.targetMarks || 0} marks</span>
-                                    </div>
-                                    <button
-                                      disabled={!test.cardStatus.isEnabled}
-                                      onClick={() => test.cardStatus.isEnabled && navigate('/test/' + test.id)}
-                                      className={`w-full py-2 text-[10px] font-bold rounded-lg uppercase tracking-wider transition-colors focus:outline-none ${test.cardStatus.buttonStyle}`}
-                                    >
-                                      {test.cardStatus.actionText}
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                            ))}
                           </div>
-                        </>
-                      );
-                    })()}
-                  </>
-                )}
-
-              </div>
-
-              {/* Right Column widgets */}
-              <div className="space-y-6">
-                {/* Recent Activity card */}
-                <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs space-y-4">
-                  <h4 className="text-xs font-extrabold text-[#031b4e] uppercase tracking-wide">Recent Activity</h4>
-                  <div className="text-center text-slate-400 py-6 text-xs font-semibold">
-                    No recent activity.
-                  </div>
-                </div>
-
-                {/* Clear Data Action Card */}
-                <div className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs space-y-3">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center border border-red-100 flex-shrink-0">
-                      <Trash2 className="w-4 h-4" />
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-900">Clear Data</h4>
-                      <p className="text-[10px] text-slate-500 font-medium">Delete your personal attempt history</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowClearDataModal(true)}
-                    className="w-full py-2 bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-bold rounded-lg uppercase tracking-wider transition-colors border border-red-200 focus:outline-none cursor-pointer"
-                  >
-                    Clear Data
-                  </button>
-                </div>
-              </div>
 
+                  </div>
+                );
+              })()}
             </div>
           ) : activeTab === 'available' ? (
             <AvailableTestsView />
