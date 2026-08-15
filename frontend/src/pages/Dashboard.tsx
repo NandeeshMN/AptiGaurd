@@ -407,8 +407,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     return () => unsub();
   }, [isAdmin, activeTab, studentsList]);
 
-  // Edit Test modal state
+  // Edit Test modal state (for published tests - metadata only)
   const [editingTest, setEditingTest] = useState<any | null>(null);
+  // Edit Draft state — full edit via CreateTestView
+  const [editingDraftTest, setEditingDraftTest] = useState<any | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editCategory, setEditCategory] = useState('');
@@ -1199,12 +1201,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
             ) : activeTab === 'profile' ? (
               <ProfileView />
             ) : activeTab === 'create-test' ? (
-              <CreateTestView onBack={(tab, toastMsg) => {
-                setActiveTab(tab || 'dashboard');
-                if (toastMsg) {
-                  setEditToastMsg(toastMsg);
-                }
-              }} />
+              <CreateTestView
+                editTest={editingDraftTest}
+                onBack={(tab, toastMsg) => {
+                  setEditingDraftTest(null);
+                  setActiveTab(tab || 'dashboard');
+                  if (toastMsg) {
+                    setEditToastMsg(toastMsg);
+                  }
+                }}
+              />
             ) : (activeTab === 'tests' || activeTab === 'drafts') ? (
               <div className="space-y-6">
                 <div>
@@ -1310,9 +1316,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                                   ) : lifecycle === 'draft' ? (
                                     <div className="flex items-center justify-end space-x-2">
                                       <button
-                                        onClick={() => {
+                                      onClick={() => {
+                                          setEditingDraftTest(t);
                                           setActiveTab('create-test');
-                                          // Note: actual editing requires passing data to CreateTestView 
                                         }}
                                         className="p-1.5 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-md transition-colors focus:outline-none"
                                         title="Edit Draft"

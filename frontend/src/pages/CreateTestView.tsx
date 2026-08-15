@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ClipboardList, ArrowLeft, Plus, Edit, Trash, X, CheckCircle, FileText, Upload, Download, AlertTriangle, Search, Calendar, UserCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { collection, getDocs, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
@@ -46,9 +46,10 @@ interface ParsedImport {
 
 interface CreateTestViewProps {
   onBack: (tab?: string, toastMsg?: string) => void;
+  editTest?: any; // If provided, pre-populates the form for editing
 }
 
-export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
+export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack, editTest }) => {
   const { currentUser } = useAuth();
   const { showConfirmation } = useActionConfirmation();
   // Step State: 'details' | 'questions' | 'schedule' | 'review'
@@ -114,6 +115,37 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
 
   // Custom UI alert message state
   const [customErrorMsg, setCustomErrorMsg] = useState<string | null>(null);
+
+  // Edit mode: track if we are editing an existing test
+  const isEditMode = Boolean(editTest?.id);
+
+  // Pre-populate form when editTest is provided
+  useEffect(() => {
+    if (!editTest?.id) return;
+    setTestTitle(editTest.title || '');
+    setDescription(editTest.description || '');
+    setCategory(editTest.category || 'Quantitative Aptitude');
+    setDifficulty(editTest.difficulty || 'Beginner');
+    setTargetQuestions(editTest.targetQuestions ? String(editTest.targetQuestions) : '30');
+    setTargetMarks(editTest.targetMarks ? String(editTest.targetMarks) : '100');
+    setPassingScore(editTest.passingScore !== undefined ? String(editTest.passingScore) : '40');
+    setEnableNegative(Boolean(editTest.enableNegative));
+    setNegativeMarks(editTest.negativeMarks !== undefined ? String(editTest.negativeMarks) : '0.25');
+    setStartDate(editTest.startDate || '');
+    setStartTime(editTest.startTime || '');
+    setEndDate(editTest.endDate || '');
+    setEndTime(editTest.endTime || '');
+    setAvailabilityType(editTest.availabilityType || 'later');
+    setAssignmentType(editTest.assignmentType || 'all');
+    // Fetch existing questions from Firestore sub-collection
+    getDocs(collection(db, 'tests', editTest.id, 'questions'))
+      .then((snap) => {
+        const qs: Question[] = [];
+        snap.forEach((d) => qs.push(d.data() as Question));
+        setQuestions(qs);
+      })
+      .catch(() => {});
+  }, [editTest?.id]);
 
   // Computed Values
   const totalQuestionsAdded = questions.length;
@@ -227,7 +259,9 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
     }
     try {
       setSaving(true);
-      const testId = doc(collection(db, 'tests')).id;
+
+      // Determine if updating an existing test or creating a new one
+      const testId = isEditMode ? editTest.id : doc(collection(db, 'tests')).id;
 
       let derivedDurationMins = 30;
       if (startDate && startTime && endDate && endTime) {
@@ -238,13 +272,12 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
         }
       }
 
-      const testData = {
-        id: testId,
+      const testData: any = {
         title: testTitle.trim(),
         description: description.trim(),
         category,
         difficulty,
-        duration: derivedDurationMins, // Derived automatically from scheduled start & end datetime
+        duration: derivedDurationMins,
         targetQuestions: parseInt(targetQuestions) || 0,
         targetMarks: parseFloat(targetMarks) || 0,
         passingScore: parseFloat(passingScore) || 0,
@@ -257,13 +290,21 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
         endTime: endTime || '',
         assignmentType,
         status,
-        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        createdBy: currentUser?.uid || 'admin'
       };
 
-      await setDoc(doc(db, 'tests', testId), testData);
+      if (isEditMode) {
+        // Update existing test document
+        await updateDoc(doc(db, 'tests', testId), testData);
+      } else {
+        // Create new test document
+        testData.id = testId;
+        testData.createdAt = serverTimestamp();
+        testData.createdBy = currentUser?.uid || 'admin';
+        await setDoc(doc(db, 'tests', testId), testData);
+      }
 
+      // Write all questions (overwrites existing ones with same id)
       for (const q of questions) {
         await setDoc(doc(db, 'tests', testId, 'questions', q.id), {
           id: q.id,
@@ -320,7 +361,7 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
   const handleSaveAsDraft = async () => {
     const testId = await saveTestToFirestore('draft');
     if (testId) {
-      onBack('tests', 'Test added successfully');
+      onBack('drafts', isEditMode ? 'Draft updated successfully' : 'Draft saved successfully');
     }
   };
 
@@ -699,7 +740,7 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div>
-              <h2 className="text-xl font-extrabold text-slate-900 leading-tight">Create New Test</h2>
+              <h2 className="text-xl font-extrabold text-slate-900 leading-tight">{isEditMode ? 'Edit Assessment' : 'Create New Test'}</h2>
               <p className="text-xs text-slate-500 font-medium">Step 1 — Test Details</p>
             </div>
           </div>
@@ -885,7 +926,7 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div>
-              <h2 className="text-xl font-extrabold text-slate-900 leading-tight">Create New Test</h2>
+              <h2 className="text-xl font-extrabold text-slate-900 leading-tight">{isEditMode ? 'Edit Assessment' : 'Create New Test'}</h2>
               <p className="text-xs text-slate-500 font-medium">Add questions to your assessment.</p>
             </div>
           </div>
@@ -1468,7 +1509,7 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div>
-              <h2 className="text-xl font-extrabold text-slate-900 leading-tight">Create New Test</h2>
+              <h2 className="text-xl font-extrabold text-slate-900 leading-tight">{isEditMode ? 'Edit Assessment' : 'Create New Test'}</h2>
               <p className="text-xs text-slate-500 font-medium">Schedule your assessment and assign it to students.</p>
             </div>
           </div>
@@ -1811,7 +1852,7 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack }) => {
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div>
-              <h2 className="text-xl font-extrabold text-slate-900 leading-tight">Create New Test</h2>
+              <h2 className="text-xl font-extrabold text-slate-900 leading-tight">{isEditMode ? 'Edit Assessment' : 'Create New Test'}</h2>
               <p className="text-xs text-slate-500 font-medium">Final Step — Review your assessment configuration before publishing.</p>
             </div>
           </div>
