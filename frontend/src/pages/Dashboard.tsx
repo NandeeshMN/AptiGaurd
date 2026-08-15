@@ -1100,7 +1100,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                                 setActiveTab('create-test');
                               }}
                               onView={() => setActiveTab('tests')}
-                              onMonitor={() => setActiveTab('results')}
+                              onMonitor={(id) => window.open(`/admin/tests/${id}/monitor`, '_blank', 'noopener,noreferrer')}
                             />
                           ))}
                         </div>

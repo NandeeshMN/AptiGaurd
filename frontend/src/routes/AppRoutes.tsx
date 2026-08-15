@@ -4,6 +4,7 @@ import { AuthPage } from '../pages/auth/AuthPage';
 import { ResetPasswordPage } from '../pages/auth/ResetPasswordPage';
 import { Dashboard } from '../pages/Dashboard';
 import { TestExecutionView } from '../pages/TestExecutionView';
+import { AdminMonitorView } from '../pages/AdminMonitorView';
 import { ProtectedRoute } from './ProtectedRoute';
 import { ActionConfirmationProvider } from '../context/ActionConfirmationContext';
 
@@ -132,6 +133,14 @@ const AnimatedRoutes: React.FC = () => {
             element={
               <ProtectedRoute>
                 <TestExecutionView />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/tests/:testId/monitor"
+            element={
+              <ProtectedRoute>
+                <AdminMonitorView />
               </ProtectedRoute>
             }
           />
