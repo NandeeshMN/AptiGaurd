@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ClipboardList, ArrowLeft, Plus, Edit, Trash, X, CheckCircle, FileText, Upload, Download, AlertTriangle, Search, Calendar, UserCheck } from 'lucide-react';
+import { ClipboardList, ArrowLeft, Edit, Trash, X, CheckCircle, FileText, Upload, Download, AlertTriangle, Search, Calendar, UserCheck } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { collection, getDocs, doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';

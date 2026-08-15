@@ -2,13 +2,11 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
-  updateProfile,
 } from 'firebase/auth';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp, query, collection, where, getDocs } from 'firebase/firestore';
+import { query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import type { LoginInput, RegisterInput } from '../schemas/authSchemas';
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Trophy, CheckCircle, BarChart3, TrendingUp } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
@@ -193,54 +193,6 @@ export const ResultsView: React.FC = () => {
 
     fetchUserResults();
   }, [currentUser]);
-
-  // Compute live statistics from attempts
-  const completedCount = attempts.length;
-  const percentages = attempts.map((a) => a.percentage ?? 0);
-  const avgScore = completedCount > 0 ? Math.round(percentages.reduce((a, b) => a + b, 0) / completedCount) : 0;
-  const bestScore = completedCount > 0 ? Math.max(...percentages) : 0;
-  const passedCount = attempts.filter((a) => {
-    const test = tests.find(t => t.id === a.testId);
-    const passing = typeof a.passingScore === 'number' ? a.passingScore : (test?.passingScore !== undefined ? test.passingScore : 40);
-    return (a.percentage ?? 0) >= passing;
-  }).length;
-  const passRate = completedCount > 0 ? Math.round((passedCount / completedCount) * 100) : 0;
-
-
-  const stats = [
-    {
-      title: 'Average Score',
-      value: `${avgScore}%`,
-      subtitle: 'Across completed tests',
-      icon: <BarChart3 className="w-5 h-5 text-[#0952cc]" />,
-      progress: avgScore,
-      progressColor: 'bg-[#0952cc]',
-    },
-    {
-      title: 'Best Score',
-      value: `${bestScore}%`,
-      subtitle: 'Highest score achieved',
-      icon: <Trophy className="w-5 h-5 text-[#0952cc]" />,
-      progress: bestScore,
-      progressColor: 'bg-emerald-600',
-    },
-    {
-      title: 'Tests Completed',
-      value: completedCount.toString().padStart(2, '0'),
-      subtitle: `Candidate: ${candidateName}`,
-      icon: <CheckCircle className="w-5 h-5 text-[#0952cc]" />,
-      progress: 100,
-      progressColor: 'bg-indigo-600',
-    },
-    {
-      title: 'Pass Rate',
-      value: `${passRate}%`,
-      subtitle: 'Passed assessments',
-      icon: <TrendingUp className="w-5 h-5 text-[#0952cc]" />,
-      progress: passRate,
-      progressColor: 'bg-[#0952cc]',
-    }
-  ];
 
   // Process rows
   const resultsData = attempts.map((att) => {

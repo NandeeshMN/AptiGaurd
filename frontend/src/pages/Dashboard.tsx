@@ -12,23 +12,21 @@ import { ProfileView } from './ProfileView';
 import { CreateTestView } from './CreateTestView';
 import { Footer } from '../components/Footer';
 import { useActionConfirmation } from '../context/ActionConfirmationContext';
-import { collection, getDocs, doc, getDoc, query, where, onSnapshot, updateDoc, setDoc, serverTimestamp, writeBatch, getCountFromServer, limit, orderBy } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, query, where, onSnapshot, updateDoc, setDoc, serverTimestamp, writeBatch, getCountFromServer } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { formatDateToDDMMYYYY, formatTimeTo12Hour } from '../utils/timeFormat';
-import { Clock, Activity, CalendarDays, Radio, ArrowRight } from 'lucide-react';
+import { Clock, Activity, CalendarDays } from 'lucide-react';
 import {
   LayoutDashboard,
   ClipboardList,
   BarChart3,
   User,
   LogOut,
-  Bell,
   HelpCircle,
   Menu,
   X,
   Plus,
   Users,
-  Search,
   CheckCheck,
   AlertTriangle,
   Trash2,
@@ -339,9 +337,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   const [loadingTests, setLoadingTests] = useState(false);
 
   const [studentsList, setStudentsList] = useState<any[]>([]);
-  const [loadingStudents, setLoadingStudents] = useState(false);
-  const [studentsSearch, setStudentsSearch] = useState('');
-
   const [recentResults, setRecentResults] = useState<any[]>([]);
   const [loadingRecentResults, setLoadingRecentResults] = useState(false);
 
@@ -637,8 +632,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   const fetchAdminStudents = async () => {
     if (!isAdmin) return;
     try {
-      setLoadingStudents(true);
-
       // 1. Fetch from Firestore users collection
       const usersSnap = await getDocs(collection(db, 'users'));
       const userMap = new Map<string, any>();
@@ -685,8 +678,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
       setStudentsList(list);
     } catch (err) {
       console.error('Error fetching admin students:', err);
-    } finally {
-      setLoadingStudents(false);
     }
   };
 
@@ -696,13 +687,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     }
   }, [isAdmin, activeTab]);
 
-  // Filtered Students list
-  const filteredStudents = studentsList.filter((s) => {
-    const q = studentsSearch.toLowerCase();
-    const nameStr = (s.name || s.fullName || '').toLowerCase();
-    const emailStr = (s.email || '').toLowerCase();
-    return nameStr.includes(q) || emailStr.includes(q);
-  });
 
 
   const [userProfile, setUserProfile] = useState<any>(null);
@@ -1110,12 +1094,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                             <AdminTestOverviewCard 
                               key={t.id} 
                               test={t} 
-                              onManage={(id) => {
+                              onManage={() => {
                                 setEditingTest(t);
                                 setActiveTab('create-test');
                               }}
-                              onView={(id) => setActiveTab('tests')}
-                              onMonitor={(id) => setActiveTab('results')}
+                              onView={() => setActiveTab('tests')}
+                              onMonitor={() => setActiveTab('results')}
                             />
                           ))}
                         </div>
