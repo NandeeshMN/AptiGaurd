@@ -10,7 +10,7 @@ import { AdminResultsView } from './AdminResultsView';
 import { AdminStudentsView } from './AdminStudentsView';
 import { ProfileView } from './ProfileView';
 import { CreateTestView } from './CreateTestView';
-import { Footer } from '../components/Footer';
+// import { Footer } from '../components/Footer';
 import { useActionConfirmation } from '../context/ActionConfirmationContext';
 import { collection, getDocs, doc, getDoc, query, where, onSnapshot, updateDoc, setDoc, serverTimestamp, writeBatch, getCountFromServer } from 'firebase/firestore';
 import { db } from '../config/firebase';
