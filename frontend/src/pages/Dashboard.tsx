@@ -164,8 +164,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   const { currentUser, logout } = useAuth();
   const { showConfirmation } = useActionConfirmation();
 
-  // Determine user role (Bypass based on email structure)
-  const isAdmin = currentUser?.email?.toLowerCase() === 'nandeeshmn12@gmail.com';
+  const [userProfile, setUserProfile] = useState<any>(null);
+  
+  // Determine user role (Bypass based on email structure or loaded profile)
+  const adminEmails = ['nandeeshmn12@gmail.com', 'cbshubli75@gmail.com'];
+  const isAdmin = adminEmails.includes(currentUser?.email?.toLowerCase() || '') || userProfile?.role === 'admin';
 
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -688,8 +691,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   }, [isAdmin, activeTab]);
 
 
-
-  const [userProfile, setUserProfile] = useState<any>(null);
 
   useEffect(() => {
     if (currentUser) {
