@@ -58,7 +58,9 @@ export const CompletedTestsView: React.FC = () => {
 
         if (att.status === 'submitted' || att.status === 'auto_submitted') {
           const pct = att.percentage ?? 0;
-          const isPassed = pct >= 40;
+          const test = assignedTestsCache.find(t => t.id === att.testId);
+          const passing = typeof att.passingScore === 'number' ? att.passingScore : (test?.passingScore !== undefined ? test.passingScore : 40);
+          const isPassed = pct >= passing;
           const dateStr = formatDateToDDMMYYYY(att.submittedAt || att.startedAtMs);
 
           const subReason = att.submissionReason

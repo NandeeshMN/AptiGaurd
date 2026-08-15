@@ -134,6 +134,7 @@ export const ResultsView: React.FC = () => {
   const [filter, setFilter] = useState<'all' | 'passed' | 'failed'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [attempts, setAttempts] = useState<any[]>([]);
+  const [tests, setTests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [candidateName, setCandidateName] = useState<string>('');
 
@@ -142,6 +143,14 @@ export const ResultsView: React.FC = () => {
       if (!currentUser) return;
       try {
         setLoading(true);
+
+        // Fetch tests to resolve passingScore dynamically
+        const testsSnap = await getDocs(collection(db, 'tests'));
+        const testsList: any[] = [];
+        testsSnap.forEach(docSnap => {
+          testsList.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        setTests(testsList);
 
         // Fetch canonical candidate profile from Firestore users collection
         const userDocSnap = await getDoc(doc(db, 'users', currentUser.uid));
@@ -190,7 +199,11 @@ export const ResultsView: React.FC = () => {
   const percentages = attempts.map((a) => a.percentage ?? 0);
   const avgScore = completedCount > 0 ? Math.round(percentages.reduce((a, b) => a + b, 0) / completedCount) : 0;
   const bestScore = completedCount > 0 ? Math.max(...percentages) : 0;
-  const passedCount = attempts.filter((a) => (a.percentage ?? 0) >= 40).length;
+  const passedCount = attempts.filter((a) => {
+    const test = tests.find(t => t.id === a.testId);
+    const passing = typeof a.passingScore === 'number' ? a.passingScore : (test?.passingScore !== undefined ? test.passingScore : 40);
+    return (a.percentage ?? 0) >= passing;
+  }).length;
   const passRate = completedCount > 0 ? Math.round((passedCount / completedCount) * 100) : 0;
 
 
@@ -222,7 +235,7 @@ export const ResultsView: React.FC = () => {
     {
       title: 'Pass Rate',
       value: `${passRate}%`,
-      subtitle: 'Passed assessments (>= 40%)',
+      subtitle: 'Passed assessments',
       icon: <TrendingUp className="w-5 h-5 text-[#0952cc]" />,
       progress: passRate,
       progressColor: 'bg-[#0952cc]',
@@ -231,8 +244,10 @@ export const ResultsView: React.FC = () => {
 
   // Process rows
   const resultsData = attempts.map((att) => {
+    const test = tests.find(t => t.id === att.testId);
+    const passing = typeof att.passingScore === 'number' ? att.passingScore : (test?.passingScore !== undefined ? test.passingScore : 40);
     const pct = att.percentage ?? 0;
-    const isPassed = pct >= 40;
+    const isPassed = pct >= passing;
     const dateStr = formatDateToDDMMYYYY(att.submittedAt || att.startedAtMs);
 
     return {
@@ -269,30 +284,7 @@ export const ResultsView: React.FC = () => {
         </p>
       </div>
 
-      {/* Metrics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        {stats.map((stat, i) => (
-          <div key={i} className="bg-white rounded-xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between min-h-[140px] hover:border-blue-200 transition-colors">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">{stat.title}</p>
-                <div className="flex items-baseline space-x-1">
-                  <h3 className="text-2xl font-extrabold text-[#031b4e]">{stat.value.replace('%', '')}</h3>
-                  {stat.value.includes('%') && <span className="text-xs text-slate-500 font-semibold">%</span>}
-                </div>
-              </div>
-              <div className="p-2 bg-blue-50/50 rounded-lg">{stat.icon}</div>
-            </div>
-            
-            <div className="mt-4 space-y-1">
-              <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                <div className={`${stat.progressColor} h-1.5 rounded-full`} style={{ width: `${stat.progress}%` }} />
-              </div>
-              <p className="text-[10px] text-slate-400 font-semibold truncate leading-none pt-1">{stat.subtitle}</p>
-            </div>
-          </div>
-        ))}
-      </div>
+
 
       {/* Results Log Table Section */}
       <div className="space-y-4">
