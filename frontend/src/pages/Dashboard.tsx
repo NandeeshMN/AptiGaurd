@@ -1360,7 +1360,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
           </main>
 
           {/* Reusable Footer Component */}
-          <Footer />
+          {/* <Footer /> */}
         </div>
 
         {/* Logout confirmation Dialog overlay card modal for Admin */}
@@ -2202,7 +2202,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
         </main>
 
         {/* Reusable Footer Component */}
-        <Footer />
+        {/* <Footer /> */}
       </div>
 
       {/* Logout confirmation Dialog overlay card modal */}
