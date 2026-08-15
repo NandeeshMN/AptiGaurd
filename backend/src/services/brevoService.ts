@@ -206,7 +206,7 @@ export const sendTestUpdateEmail = async ({
   const apiKey = process.env.BREVO_API_KEY;
   const senderEmail = process.env.BREVO_SENDER_EMAIL || 'nandeeshmn12@gmail.com';
   const senderName = process.env.BREVO_SENDER_NAME || 'AptiGuard';
-  const dashboardUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || 'http://localhost:5173';
+  const dashboardUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 
   if (!apiKey) {
     console.error(`[Test Updated Email] Recipient: ${recipientEmail} | Status: FAILED (BREVO_API_KEY missing in environment)`);
