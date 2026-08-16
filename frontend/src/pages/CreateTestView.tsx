@@ -6,6 +6,7 @@ import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
 import { formatTimeTo12Hour } from '../utils/timeFormat';
 import { useActionConfirmation } from '../context/ActionConfirmationContext';
+import { API_BASE_URL } from '../config/api';
 
 
 interface Student {
@@ -1974,20 +1975,49 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack, editTest
                     const testId = await saveTestToFirestore('published');
                     if (!testId) return;
 
-                    // Trigger backend publish route asynchronously in background (non-blocking)
+                    // Trigger backend publish/update route asynchronously in background
                     currentUser?.getIdToken().then((idToken) => {
                       if (idToken) {
-                        fetch(`${import.meta.env.VITE_API_URL}/api/tests/${testId}/publish`, {
-                          method: 'PATCH',
-                          headers: {
-                            'Authorization': `Bearer ${idToken}`
-                          }
-                        }).catch((apiErr) => console.warn('[PublishTest] Background notification API error:', apiErr));
+                        if (isEditMode) {
+                          fetch(`${API_BASE_URL}/api/tests/${testId}`, {
+                            method: 'PUT',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': `Bearer ${idToken}`
+                            },
+                            body: JSON.stringify({
+                              title: testTitle.trim(),
+                              description: description.trim(),
+                              category,
+                              difficulty,
+                              targetQuestions: parseInt(targetQuestions) || questions.length,
+                              targetMarks: parseFloat(targetMarks) || 0,
+                              passingScore: parseFloat(passingScore) || 40,
+                              totalQuestions: questions.length,
+                              enableNegative,
+                              negativeMarks: enableNegative ? parseFloat(negativeMarks) || 0 : 0,
+                              startDate: startDate || '',
+                              startTime: startTime || '',
+                              endDate: endDate || '',
+                              endTime: endTime || '',
+                              assignmentType,
+                              selectedStudentUids,
+                              status: 'published',
+                            })
+                          }).catch((apiErr) => console.warn('[UpdateTest] Background notification API error:', apiErr));
+                        } else {
+                          fetch(`${API_BASE_URL}/api/tests/${testId}/publish`, {
+                            method: 'PATCH',
+                            headers: {
+                              'Authorization': `Bearer ${idToken}`
+                            }
+                          }).catch((apiErr) => console.warn('[PublishTest] Background notification API error:', apiErr));
+                        }
                       }
                     }).catch(() => {});
 
                     // Show success confirmation popup
-                    showConfirmation({ message: 'Test added successfully', type: 'success' });
+                    showConfirmation({ message: isEditMode ? 'Test updated successfully' : 'Test added successfully', type: 'success' });
 
                     // Success — navigate to Tests tab immediately
                     onBack('tests');
@@ -1995,7 +2025,7 @@ export const CreateTestView: React.FC<CreateTestViewProps> = ({ onBack, editTest
                   disabled={saving}
                   className="flex-1 sm:flex-initial px-4 py-2 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white text-[11px] font-bold rounded-lg uppercase tracking-wider text-center focus:outline-none transition-colors disabled:opacity-50"
                 >
-                  {saving ? 'Publishing...' : 'Publish Test'}
+                  {saving ? (isEditMode ? 'Updating...' : 'Publishing...') : (isEditMode ? 'Update Assessment' : 'Publish Test')}
                 </button>
               </div>
             </div>

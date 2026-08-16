@@ -12,6 +12,7 @@ import { ProfileView } from './ProfileView';
 import { CreateTestView } from './CreateTestView';
 // import { Footer } from '../components/Footer';
 import { useActionConfirmation } from '../context/ActionConfirmationContext';
+import { API_BASE_URL } from '../config/api';
 import { collection, getDocs, doc, getDoc, query, where, onSnapshot, updateDoc, setDoc, serverTimestamp, writeBatch, getCountFromServer } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { formatDateToDDMMYYYY, formatTimeTo12Hour } from '../utils/timeFormat';
@@ -186,8 +187,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     try {
       const token = await currentUser.getIdToken();
       const endpoint = isAdmin
-        ? `${import.meta.env.VITE_API_URL}/api/tests/clear-data/admin`
-        : `${import.meta.env.VITE_API_URL}/api/tests/clear-data/student`;
+        ? `${API_BASE_URL}/api/tests/clear-data/admin`
+        : `${API_BASE_URL}/api/tests/clear-data/student`;
 
       if (token) {
         try {
@@ -412,8 +413,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editCategory, setEditCategory] = useState('');
-  const [editDifficulty, setEditDifficulty] = useState('');
-  const [_editDuration, setEditDuration] = useState('');
+  const [editDifficulty, setEditDifficulty] = useState('Intermediate');
+  const [_editDuration, setEditDuration] = useState('30');
+  const [editPassingScore, setEditPassingScore] = useState('40');
+  const [editTargetMarks, setEditTargetMarks] = useState('100');
+  const [editTargetQuestions, setEditTargetQuestions] = useState('30');
   const [editEnableNegative, setEditEnableNegative] = useState(false);
   const [editNegativeMarks, setEditNegativeMarks] = useState('0.25');
   const [editStartDate, setEditStartDate] = useState('');
@@ -443,7 +447,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     setDeleteDraftTitle('');
     try {
       const token = await currentUser?.getIdToken();
-      const res = await fetch(`http://localhost:5000/api/tests/${idToDelete}`, {
+      const res = await fetch(`${API_BASE_URL}/api/tests/${idToDelete}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -496,6 +500,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     setEditCategory(t.category || 'Quantitative Aptitude');
     setEditDifficulty(t.difficulty || 'Intermediate');
     setEditDuration(t.duration ? String(t.duration) : '30');
+    setEditPassingScore(t.passingScore !== undefined ? String(t.passingScore) : '40');
+    setEditTargetMarks(t.targetMarks !== undefined ? String(t.targetMarks) : (t.totalMarks !== undefined ? String(t.totalMarks) : '100'));
+    setEditTargetQuestions(t.targetQuestions !== undefined ? String(t.targetQuestions) : (t.totalQuestions !== undefined ? String(t.totalQuestions) : '30'));
     setEditEnableNegative(Boolean(t.enableNegative));
     setEditNegativeMarks(t.negativeMarks !== undefined ? String(t.negativeMarks) : '0.25');
     setEditStartDate(t.startDate || '');
@@ -544,11 +551,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
       }
 
       const payload: any = {
-        title: editTitle,
-        description: editDescription,
+        title: editTitle.trim(),
+        description: editDescription.trim(),
         category: editCategory,
         difficulty: editDifficulty,
         duration: derivedDurationMins,
+        passingScore: parseFloat(editPassingScore) || 40,
+        targetMarks: parseFloat(editTargetMarks) || 0,
+        targetQuestions: parseInt(editTargetQuestions) || 0,
+        totalMarks: parseFloat(editTargetMarks) || 0,
+        totalQuestions: parseInt(editTargetQuestions) || 0,
         enableNegative: editEnableNegative,
         negativeMarks: editEnableNegative ? (parseFloat(editNegativeMarks) || 0) : 0,
         startDate: editStartDate,
@@ -565,7 +577,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
       let backendFailed = false;
       if (token) {
         try {
-          const res = await fetch(`${import.meta.env.VITE_API_URL}/api/tests/${editingTest.id}`, {
+          const res = await fetch(`${API_BASE_URL}/api/tests/${editingTest.id}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -1096,8 +1108,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                               key={t.id} 
                               test={t} 
                               onManage={() => {
-                                setEditingTest(t);
-                                setActiveTab('create-test');
+                                handleOpenEditModal(t);
                               }}
                               onView={() => setActiveTab('tests')}
                               onMonitor={(id) => window.open(`/admin/tests/${id}/monitor`, '_blank', 'noopener,noreferrer')}
@@ -1484,14 +1495,62 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                     />
                   </div>
 
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Category</label>
-                    <input
-                      type="text"
-                      value={editCategory}
-                      onChange={(e) => setEditCategory(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none text-xs text-slate-800"
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Category</label>
+                      <input
+                        type="text"
+                        value={editCategory}
+                        onChange={(e) => setEditCategory(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none text-xs text-slate-800"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Difficulty</label>
+                      <select
+                        value={editDifficulty}
+                        onChange={(e) => setEditDifficulty(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none text-xs text-slate-800 bg-white"
+                      >
+                        <option value="Beginner">Beginner</option>
+                        <option value="Intermediate">Intermediate</option>
+                        <option value="Advanced">Advanced</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Total Questions</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={editTargetQuestions}
+                        onChange={(e) => setEditTargetQuestions(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none text-xs text-slate-800 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Total Marks</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={editTargetMarks}
+                        onChange={(e) => setEditTargetMarks(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none text-xs text-slate-800 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide block mb-1">Passing Score (%)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={editPassingScore}
+                        onChange={(e) => setEditPassingScore(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none text-xs text-slate-800 font-bold"
+                      />
+                    </div>
                   </div>
 
                   {/* Negative Marking Configuration */}
