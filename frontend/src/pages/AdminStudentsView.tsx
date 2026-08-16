@@ -5,6 +5,7 @@ import { db } from '../config/firebase';
 import { collection, query, onSnapshot, orderBy, Timestamp } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { ToastNotification } from '../components/ToastNotification';
+import { API_BASE_URL } from '../config/api';
 import * as XLSX from 'xlsx';
 
 interface AuthorizedStudent {
@@ -65,7 +66,7 @@ export const AdminStudentsView = () => {
     setErrorMsg('');
     try {
       const token = await getAuth().currentUser?.getIdToken();
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/admin/students/add`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/students/add`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -92,7 +93,7 @@ export const AdminStudentsView = () => {
     setAddLoading(true);
     try {
       const token = await getAuth().currentUser?.getIdToken();
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/admin/students/promote`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/students/promote`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -120,7 +121,7 @@ export const AdminStudentsView = () => {
     
     try {
       const token = await getAuth().currentUser?.getIdToken();
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/admin/students/archive`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/students/archive`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -151,7 +152,7 @@ export const AdminStudentsView = () => {
     try {
       const uucmsNumbers = filteredStudents.map(s => s.uucmsNo);
       const token = await getAuth().currentUser?.getIdToken();
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/admin/students/archive`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/students/archive`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -185,7 +186,7 @@ export const AdminStudentsView = () => {
     
     try {
       const token = await getAuth().currentUser?.getIdToken();
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/admin/students/unarchive`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/students/unarchive`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -216,7 +217,7 @@ export const AdminStudentsView = () => {
     try {
       const uucmsNumbers = filteredStudents.map(s => s.uucmsNo);
       const token = await getAuth().currentUser?.getIdToken();
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/admin/students/unarchive`, {
+      const res = await fetch(`${API_BASE_URL}/api/admin/students/unarchive`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -272,7 +273,7 @@ export const AdminStudentsView = () => {
         }
 
         const token = await getAuth().currentUser?.getIdToken();
-        const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/admin/students/import`, {
+        const res = await fetch(`${API_BASE_URL}/api/admin/students/import`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

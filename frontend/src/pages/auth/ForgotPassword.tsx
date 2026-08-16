@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, KeyRound, Lock, CheckCircle, ArrowLeft, RefreshCw, Eye, EyeOff } from 'lucide-react';
+import { API_BASE_URL } from '../../config/api';
 
 interface ForgotPasswordProps {
   onBack: () => void;
@@ -68,7 +69,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBack, prefillE
     setSending(true);
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/send-otp`, {
+      const response = await fetch(`${API_BASE_URL}/api/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: sanitized }),
@@ -102,7 +103,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBack, prefillE
     setOtpError('');
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/send-otp`, {
+      const response = await fetch(`${API_BASE_URL}/api/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim() }),
@@ -178,7 +179,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBack, prefillE
     setVerifying(true);
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/verify-otp`, {
+      const response = await fetch(`${API_BASE_URL}/api/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), otp: entered }),
@@ -219,7 +220,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onBack, prefillE
     setResetting(true);
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/reset-password-otp`, {
+      const response = await fetch(`${API_BASE_URL}/api/auth/reset-password-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
