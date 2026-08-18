@@ -206,7 +206,8 @@ export const sendTestUpdateEmail = async ({
   const apiKey = process.env.BREVO_API_KEY;
   const senderEmail = process.env.BREVO_SENDER_EMAIL || 'nandeeshmn12@gmail.com';
   const senderName = process.env.BREVO_SENDER_NAME || 'AptiGuard';
-  const dashboardUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const productionBaseUrl = 'https://apti-gaurd.vercel.app';
+  const dashboardUrl = (process.env.FRONTEND_URL && !process.env.FRONTEND_URL.includes('localhost')) ? process.env.FRONTEND_URL : productionBaseUrl;
 
   if (!apiKey) {
     console.error(`[Test Updated Email] Recipient: ${recipientEmail} | Status: FAILED (BREVO_API_KEY missing in environment)`);
@@ -298,10 +299,23 @@ export const sendTestUpdateEmail = async ({
               </tr>
               <tr>
                 <td style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #334155; line-height: 1.6; padding-bottom: 24px;">
-                  Please review the revised assessment details below.
+                  Please review the revised assessment details and schedule below.
                 </td>
               </tr>
             </table>
+
+            <!-- WHAT'S CHANGED CALLOUT -->
+            ${changedDetails && changedDetails.length > 0 ? `
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #fefce8; border: 1px solid #fef08a; border-left: 4px solid #ca8a04; border-radius: 8px; margin-bottom: 24px;">
+              <tr>
+                <td style="padding: 16px 20px; font-family: Arial, Helvetica, sans-serif;">
+                  <div style="font-size: 11px; font-weight: 800; color: #854d0e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Summary of Updates</div>
+                  <ul style="margin: 0; padding-left: 18px; font-size: 13px; font-weight: 600; color: #713f12; line-height: 1.6;">
+                    ${changedDetailsHtml}
+                  </ul>
+                </td>
+              </tr>
+            </table>` : ''}
 
             <!-- ASSESSMENT DETAILS CARD -->
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #0952cc; border-radius: 8px; margin-bottom: 24px;">
@@ -318,11 +332,11 @@ export const sendTestUpdateEmail = async ({
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size: 13.5px; font-weight: 600; color: #334155; line-height: 1.6;">
                     <tr>
                       <td width="30%" style="padding-bottom: 6px; color: #64748b;">Category</td>
-                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${category || 'N/A'}</td>
+                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${category || 'General'}</td>
                     </tr>
                     <tr>
                       <td width="30%" style="padding-bottom: 6px; color: #64748b;">Difficulty</td>
-                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${difficulty || 'N/A'}</td>
+                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${difficulty || 'Intermediate'}</td>
                     </tr>
                     <tr>
                       <td width="30%" style="padding-bottom: 6px; color: #64748b;">Questions</td>
@@ -334,11 +348,11 @@ export const sendTestUpdateEmail = async ({
                     </tr>
                     <tr>
                       <td width="30%" style="padding-bottom: 6px; color: #64748b;">Duration</td>
-                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${duration ? duration + ' minutes' : 'N/A'}</td>
+                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${duration ? duration + ' minutes' : '30 minutes'}</td>
                     </tr>
                     <tr>
                       <td width="30%" style="padding-bottom: 6px; color: #64748b;">Passing Score</td>
-                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${passingScore || 0}</td>
+                      <td width="70%" style="padding-bottom: 6px; color: #0f172a;">${passingScore || 0}%</td>
                     </tr>
                     <tr>
                       <td width="30%" style="padding-bottom: 6px; color: #64748b;">Status</td>
@@ -390,7 +404,7 @@ export const sendTestUpdateEmail = async ({
                   <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                     <tr>
                       <td align="center" bgcolor="#0952cc" style="border-radius: 8px;">
-                        <a href="${dashboardUrl}/student/tests/${testId}" target="_blank" style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 800; color: #ffffff; text-decoration: none; display: inline-block; padding: 14px 32px; border-radius: 8px; border: 1px solid #0952cc; background-color: #0952cc;">VIEW ASSESSMENT</a>
+                        <a href="${productionBaseUrl}/test/${testId}" target="_blank" style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 800; color: #ffffff; text-decoration: none; display: inline-block; padding: 14px 32px; border-radius: 8px; border: 1px solid #0952cc; background-color: #0952cc;">VIEW ASSESSMENT</a>
                       </td>
                     </tr>
                   </table>

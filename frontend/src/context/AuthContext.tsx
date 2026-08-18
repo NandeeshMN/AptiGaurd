@@ -8,6 +8,7 @@ import {
 import type { User as FirebaseUser } from 'firebase/auth';
 import { query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
+import { API_BASE_URL } from '../config/api';
 import type { LoginInput, RegisterInput } from '../schemas/authSchemas';
 
 interface AuthContextType {
@@ -37,7 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Expose register method
   const registerUser = async (data: RegisterInput) => {
     // 1. Call secure backend registration endpoint
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/auth/register`, {
+    const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),

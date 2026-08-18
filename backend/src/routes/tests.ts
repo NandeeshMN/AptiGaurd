@@ -86,98 +86,202 @@ router.get('/available', requireAuth, async (req: AuthRequest, res: Response): P
 
 import { sendBatchTestUpdateEmails } from '../services/brevoService';
 
-const triggerTestUpdateEmailsAsync = async (testId: string, testTitle: string, changedDetails: string[], testData: any) => {
+const maskEmailForLogs = (email: string): string => {
+  if (!email || !email.includes('@')) return '***';
+  const [user, domain] = email.split('@');
+  if (user.length <= 2) return `${user.charAt(0)}*@${domain}`;
+  return `${user.slice(0, 2)}****@${domain}`;
+};
+
+// Helper to resolve accurate total questions and total marks from Firestore
+const resolveTestQuestionsAndMarks = async (
+  testDocRef: admin.firestore.DocumentReference,
+  fallbackData: any = {}
+): Promise<{ totalQuestions: number; totalMarks: number }> => {
+  let totalQuestions = 0;
+  let totalMarks = 0;
+
+  try {
+    const questionsSnap = await testDocRef.collection('questions').get();
+    if (!questionsSnap.empty) {
+      totalQuestions = questionsSnap.size;
+      questionsSnap.forEach((qDoc) => {
+        const q = qDoc.data() || {};
+        totalMarks += Number(q.marks || 1);
+      });
+    }
+  } catch (err) {
+    console.warn(`[ResolveQuestions] Warning querying questions subcollection for ${testDocRef.id}:`, err);
+  }
+
+  // If subcollection was empty or not populated, use explicit fallback fields
+  if (totalQuestions === 0) {
+    totalQuestions = Number(fallbackData.totalQuestions) || Number(fallbackData.targetQuestions) || (Array.isArray(fallbackData.questions) ? fallbackData.questions.length : 0);
+  }
+
+  if (totalMarks === 0) {
+    if (Array.isArray(fallbackData.questions) && fallbackData.questions.length > 0) {
+      fallbackData.questions.forEach((q: any) => {
+        totalMarks += Number(q.marks || 1);
+      });
+    } else {
+      totalMarks = Number(fallbackData.totalMarks) || Number(fallbackData.targetMarks) || 0;
+    }
+  }
+
+  return { totalQuestions, totalMarks };
+};
+
+// Helper to resolve eligible student recipients without duplicate emails or admin accounts
+const resolveTestRecipients = async (
+  testDocRef: admin.firestore.DocumentReference,
+  assignmentType: string,
+  selectedStudentUids: string[] = []
+): Promise<Array<{ email: string; name: string }>> => {
+  const recipientsMap = new Map<string, { email: string; name: string }>();
+  if (!adminDb) return [];
+
+  const addStudentUser = (u: any) => {
+    const rawEmail = u.email ? String(u.email).trim().toLowerCase() : '';
+    const role = (u.role || '').toLowerCase();
+
+    // Strictly students only — never email admins
+    if (rawEmail && role === 'student') {
+      let rawName = u.name || u.fullName || u.displayName || '';
+      if (!rawName || rawName.includes('@')) {
+        const prefix = rawEmail.split('@')[0];
+        rawName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+      }
+      recipientsMap.set(rawEmail, { email: rawEmail, name: rawName });
+    }
+  };
+
+  if (assignmentType === 'all') {
+    const usersSnap = await adminDb.collection('users').where('role', '==', 'student').get();
+    usersSnap.forEach((uDoc) => addStudentUser(uDoc.data()));
+  } else if (assignmentType === '1st Year' || assignmentType === '2nd Year') {
+    // 1. Fetch from users collection by matching year and role
+    const usersSnap = await adminDb.collection('users')
+      .where('role', '==', 'student')
+      .where('year', '==', assignmentType)
+      .get();
+    usersSnap.forEach((uDoc) => addStudentUser(uDoc.data()));
+
+    // 2. Also check assignedStudents subcollection as fallback
+    const assignedSubSnap = await testDocRef.collection('assignedStudents').get();
+    for (const aDoc of assignedSubSnap.docs) {
+      const aData = aDoc.data();
+      const uid = aData.uid || aDoc.id;
+      if (uid) {
+        const uSnap = await adminDb.collection('users').doc(uid).get();
+        if (uSnap.exists) addStudentUser(uSnap.data());
+      }
+    }
+  } else {
+    // assignmentType === 'selected'
+    const assignedUids = new Set<string>(
+      Array.isArray(selectedStudentUids) ? selectedStudentUids : []
+    );
+
+    const assignedSubSnap = await testDocRef.collection('assignedStudents').get();
+    assignedSubSnap.forEach((aDoc) => {
+      const aData = aDoc.data();
+      const uid = aData.uid || aDoc.id;
+      if (uid) assignedUids.add(uid);
+    });
+
+    for (const uid of Array.from(assignedUids)) {
+      const uSnap = await adminDb.collection('users').doc(uid).get();
+      if (uSnap.exists) {
+        addStudentUser(uSnap.data());
+      }
+    }
+  }
+
+  return Array.from(recipientsMap.values());
+};
+
+const triggerTestUpdateEmailsAsync = async (
+  testId: string,
+  testTitle: string,
+  changedDetails: string[],
+  testData: any
+) => {
   try {
     if (!adminDb) return;
-
-    console.log(`[Test Update]\nTest updated successfully: ${testId}`);
 
     const testDocRef = adminDb.collection('tests').doc(testId);
     const testSnap = await testDocRef.get();
     const currentData = testSnap.exists ? { ...testSnap.data(), ...testData } : testData;
 
+    const testStatus = currentData.status || 'published';
+
+    // Do NOT send update emails for draft tests
+    if (testStatus === 'draft') {
+      console.log(`[Test Update Email] Test ${testId} is in DRAFT status. Skipping student email dispatch.`);
+      return;
+    }
+
+    // Do NOT send update emails if there are no student-visible changes (CASE 7)
+    if (!changedDetails || changedDetails.length === 0) {
+      console.log(`[Test Update Email] No student-visible changes detected for test ${testId}. Email dispatch skipped.`);
+      return;
+    }
+
+    // Calculate source-of-truth total questions and total marks
+    const { totalQuestions, totalMarks } = await resolveTestQuestionsAndMarks(testDocRef, currentData);
+
+    const passingScore = typeof currentData.passingScore === 'number'
+      ? currentData.passingScore
+      : (typeof currentData.passingMarks === 'number' ? currentData.passingMarks : 40);
+
+    const duration = Number(currentData.duration) || 30;
+
+    // Synchronize resolved counts back to root Firestore document
+    try {
+      await testDocRef.set({ totalQuestions, totalMarks }, { merge: true });
+    } catch (syncErr) {
+      console.warn('[Test Update Email] Notice syncing totalQuestions/totalMarks:', syncErr);
+    }
+
     const assignmentType = currentData.assignmentType || 'all';
-    const recipientsMap = new Map<string, { email: string; name: string }>();
+    const selectedUids = currentData.selectedStudentUids || [];
+    const recipients = await resolveTestRecipients(testDocRef, assignmentType, selectedUids);
 
-    if (assignmentType === 'all') {
-      const usersSnap = await adminDb.collection('users').where('role', '==', 'student').get();
-      usersSnap.forEach((uDoc) => {
-        const u = uDoc.data();
-        const rawEmail = u.email ? String(u.email).trim().toLowerCase() : '';
-        const role = (u.role || '').toLowerCase();
+    const maskedRecipients = recipients.map(r => maskEmailForLogs(r.email));
 
-        if (rawEmail && role === 'student') {
-          let rawName = u.name || u.fullName || u.displayName || '';
-          if (!rawName || rawName.includes('@')) {
-            const prefix = rawEmail.split('@')[0];
-            rawName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
-          }
-          recipientsMap.set(rawEmail, { email: rawEmail, name: rawName });
-        }
-      });
-    } else {
-      const assignedUids = new Set<string>(
-        Array.isArray(currentData.selectedStudentUids) ? currentData.selectedStudentUids : []
-      );
+    console.log(`[Test Update Email] Test ID: ${testId}`);
+    console.log(`[Test Update Email] Changed fields (${changedDetails.length}):\n  - ${changedDetails.join('\n  - ')}`);
+    console.log(`[Test Update Email] Total Questions: ${totalQuestions} | Total Marks: ${totalMarks} | Passing Score: ${passingScore}% | Duration: ${duration} mins`);
+    console.log(`[Test Update Email] Assigned student count: ${recipients.length}`);
+    console.log(`[Test Update Email] Recipient emails: ${maskedRecipients.join(', ') || 'None'}`);
 
-      const assignedSubSnap = await testDocRef.collection('assignedStudents').get();
-      assignedSubSnap.forEach((aDoc) => {
-        const aData = aDoc.data();
-        const uid = aData.uid || aDoc.id;
-        if (uid) assignedUids.add(uid);
-      });
-
-      for (const uid of Array.from(assignedUids)) {
-        const uSnap = await adminDb.collection('users').doc(uid).get();
-        if (uSnap.exists) {
-          const u = uSnap.data() || {};
-          const rawEmail = u.email ? String(u.email).trim().toLowerCase() : '';
-          const role = (u.role || '').toLowerCase();
-          
-          if (rawEmail && role === 'student') {
-            let rawName = u.name || u.fullName || u.displayName || '';
-            if (!rawName || rawName.includes('@')) {
-              const prefix = rawEmail.split('@')[0];
-              rawName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
-            }
-            recipientsMap.set(rawEmail, { email: rawEmail, name: rawName });
-          }
-        }
-      }
+    if (recipients.length === 0) {
+      console.log(`[Test Update Email] Notice: No eligible student recipients found for test ${testId}`);
+      return;
     }
 
-    const recipients = Array.from(recipientsMap.values());
-    console.log(`[Test Update Email]\nEligible recipients: ${recipients.length}`);
+    console.log(`[Test Update Email] Dispatching emails to ${recipients.length} students...`);
 
-    if (recipients.length > 0) {
-      console.log(`[Test Update Email]\nDispatch started`);
+    const batchStats = await sendBatchTestUpdateEmails(recipients, {
+      testId: testId,
+      testTitle: currentData.title || testTitle || 'Assessment',
+      description: currentData.description || '',
+      category: currentData.category || 'General',
+      difficulty: currentData.difficulty || 'Intermediate',
+      totalQuestions: totalQuestions,
+      totalMarks: totalMarks,
+      passingScore: passingScore,
+      testStatus: testStatus,
+      changedDetails: changedDetails,
+      startDate: currentData.startDate || null,
+      startTime: currentData.startTime || null,
+      endDate: currentData.endDate || null,
+      endTime: currentData.endTime || null,
+      duration: duration,
+    });
 
-      const effectiveChanges = changedDetails && changedDetails.length > 0
-        ? changedDetails
-        : ['Assessment configuration or schedule has been updated.'];
-
-      const batchStats = await sendBatchTestUpdateEmails(recipients, {
-        testId: testId,
-        testTitle: testTitle || currentData.title || 'Assessment',
-        description: currentData.description || '',
-        category: currentData.category || 'General',
-        difficulty: currentData.difficulty || 'Medium',
-        totalQuestions: currentData.totalQuestions || 0,
-        totalMarks: currentData.totalMarks || 0,
-        passingScore: currentData.passingScore || 0,
-        testStatus: currentData.status || 'draft',
-        changedDetails: effectiveChanges,
-        startDate: currentData.startDate,
-        startTime: currentData.startTime,
-        endDate: currentData.endDate,
-        endTime: currentData.endTime,
-        duration: currentData.duration,
-      });
-
-      console.log(`[Test Update Email]\nCompleted: ${batchStats.sentCount}\nFailed: ${batchStats.failedCount}`);
-    } else {
-      console.log(`[Test Update Email]\nNotice: No eligible recipients found for test ${testId}`);
-    }
+    console.log(`[Test Update Email] Dispatch completed. Sent: ${batchStats.sentCount}, Failed: ${batchStats.failedCount}`);
   } catch (err: any) {
     console.error(`[Test Update Email] Dispatch error:`, err?.message || err);
     throw err;
@@ -199,75 +303,157 @@ router.put('/:testId', requireAuth, requireAdmin, async (req: AuthRequest, res: 
     }
 
     const oldData = existingSnap.data() || {};
-    const nowMs = Date.now();
-
-    // SERVER-TIME AUTHORITATIVE EDIT LOCK ENFORCEMENT
-    // Once scheduled start time has been reached, editing is permanently locked on backend.
-    const availabilityType = oldData.availabilityType || 'later';
-    let startMs = 0;
-
-    if (availabilityType === 'immediate') {
-      startMs = oldData.createdAt?.toDate ? oldData.createdAt.toDate().getTime() : 0;
-    } else {
-      const sDate = oldData.startDate || '';
-      const sTime = oldData.startTime || '00:00';
-      startMs = new Date(`${sDate}T${sTime}:00+05:30`).getTime();
-    }
-
-    if (startMs > 0 && nowMs >= startMs) {
-      res.status(403).json({
-        success: false,
-        message: 'Test has already started and can no longer be edited after the scheduled start time.',
-      });
-      return;
-    }
-
     const body = req.body || {};
+
+    // Get current question stats before update
+    const { totalQuestions: oldQCount, totalMarks: oldTotalMarks } = await resolveTestQuestionsAndMarks(testDocRef, oldData);
 
     const changedDetails: string[] = [];
 
-    if (body.title && body.title.trim() !== oldData.title) {
+    // 1. Title / Name
+    if (body.title !== undefined && body.title.trim() !== (oldData.title || '').trim()) {
       changedDetails.push(`Test Title: "${oldData.title || 'Untitled'}" → "${body.title.trim()}"`);
     }
-    if (body.description !== undefined && body.description.trim() !== oldData.description) {
+
+    // 2. Description
+    if (body.description !== undefined && body.description.trim() !== (oldData.description || '').trim()) {
       changedDetails.push(`Description updated`);
     }
+
+    // 3. Category
+    if (body.category !== undefined && body.category.trim() !== (oldData.category || '').trim()) {
+      changedDetails.push(`Category: "${oldData.category || 'General'}" → "${body.category.trim()}"`);
+    }
+
+    // 4. Difficulty
+    if (body.difficulty !== undefined && body.difficulty.trim() !== (oldData.difficulty || '').trim()) {
+      changedDetails.push(`Difficulty: "${oldData.difficulty || 'Intermediate'}" → "${body.difficulty.trim()}"`);
+    }
+
+    // 5. Duration
     if (body.duration !== undefined && Number(body.duration) !== Number(oldData.duration)) {
-      changedDetails.push(`Duration: ${oldData.duration || 0} mins → ${body.duration} mins`);
+      changedDetails.push(`Duration: ${oldData.duration || 30} mins → ${body.duration} mins`);
     }
-    if (body.startDate && body.startDate !== oldData.startDate) {
-      changedDetails.push(`Start Date: ${oldData.startDate || 'N/A'} → ${body.startDate}`);
+
+    // 6. Start Date
+    if (body.startDate !== undefined && body.startDate !== (oldData.startDate || '')) {
+      changedDetails.push(`Start Date: ${oldData.startDate || 'Immediate'} → ${body.startDate || 'Immediate'}`);
     }
-    if (body.startTime && body.startTime !== oldData.startTime) {
-      changedDetails.push(`Start Time: ${oldData.startTime || 'N/A'} → ${body.startTime}`);
+
+    // 7. Start Time
+    if (body.startTime !== undefined && body.startTime !== (oldData.startTime || '')) {
+      changedDetails.push(`Start Time: ${oldData.startTime || 'Immediate'} → ${body.startTime || 'Immediate'}`);
     }
-    if (body.endDate && body.endDate !== oldData.endDate) {
-      changedDetails.push(`End Date: ${oldData.endDate || 'N/A'} → ${body.endDate}`);
+
+    // 8. End Date
+    if (body.endDate !== undefined && body.endDate !== (oldData.endDate || '')) {
+      changedDetails.push(`End Date: ${oldData.endDate || 'Flexible'} → ${body.endDate || 'Flexible'}`);
     }
-    if (body.endTime && body.endTime !== oldData.endTime) {
-      changedDetails.push(`End Time: ${oldData.endTime || 'N/A'} → ${body.endTime}`);
+
+    // 9. End Time
+    if (body.endTime !== undefined && body.endTime !== (oldData.endTime || '')) {
+      changedDetails.push(`End Time: ${oldData.endTime || 'Flexible'} → ${body.endTime || 'Flexible'}`);
     }
-    if (body.targetQuestions !== undefined && Number(body.targetQuestions) !== Number(oldData.targetQuestions)) {
-      changedDetails.push(`Total Questions: ${oldData.targetQuestions || 0} → ${body.targetQuestions}`);
+
+    // 10. Total / Target Questions
+    const newTargetQuestions = body.totalQuestions !== undefined
+      ? Number(body.totalQuestions)
+      : (body.targetQuestions !== undefined ? Number(body.targetQuestions) : oldQCount);
+    if ((body.totalQuestions !== undefined || body.targetQuestions !== undefined) && newTargetQuestions !== oldQCount) {
+      changedDetails.push(`Total Questions: ${oldQCount} → ${newTargetQuestions}`);
     }
-    if (body.targetMarks !== undefined && Number(body.targetMarks) !== Number(oldData.targetMarks)) {
-      changedDetails.push(`Total Marks: ${oldData.targetMarks || 0} → ${body.targetMarks}`);
+
+    // 11. Total / Target Marks
+    const newTargetMarks = body.totalMarks !== undefined
+      ? Number(body.totalMarks)
+      : (body.targetMarks !== undefined ? Number(body.targetMarks) : oldTotalMarks);
+    if ((body.totalMarks !== undefined || body.targetMarks !== undefined) && newTargetMarks !== oldTotalMarks) {
+      changedDetails.push(`Total Marks: ${oldTotalMarks} → ${newTargetMarks}`);
     }
+
+    // 12. Passing Score
+    const oldPassing = typeof oldData.passingScore === 'number' ? oldData.passingScore : (typeof oldData.passingMarks === 'number' ? oldData.passingMarks : 40);
+    const newPassing = body.passingScore !== undefined ? Number(body.passingScore) : (body.passingMarks !== undefined ? Number(body.passingMarks) : oldPassing);
+    if ((body.passingScore !== undefined || body.passingMarks !== undefined) && newPassing !== oldPassing) {
+      changedDetails.push(`Passing Score: ${oldPassing}% → ${newPassing}%`);
+    }
+
+    // 13. Negative Marking
     if (body.enableNegative !== undefined && Boolean(body.enableNegative) !== Boolean(oldData.enableNegative)) {
       changedDetails.push(`Negative Marking: ${oldData.enableNegative ? `Enabled (${oldData.negativeMarks || 0})` : 'Disabled'} → ${body.enableNegative ? `Enabled (${body.negativeMarks || 0})` : 'Disabled'}`);
     } else if (body.enableNegative && body.negativeMarks !== undefined && Number(body.negativeMarks) !== Number(oldData.negativeMarks)) {
       changedDetails.push(`Negative Penalty: ${oldData.negativeMarks || 0} marks → ${body.negativeMarks} marks`);
     }
-    if (body.status && body.status !== oldData.status) {
+
+    // 14. Assignment Type & Selected Students
+    if (body.assignmentType !== undefined && body.assignmentType !== (oldData.assignmentType || 'all')) {
+      changedDetails.push(`Assignment Type: "${oldData.assignmentType || 'all'}" → "${body.assignmentType}"`);
+    } else if (body.assignmentType === 'selected' && Array.isArray(body.selectedStudentUids)) {
+      const oldSelected = Array.isArray(oldData.selectedStudentUids) ? oldData.selectedStudentUids.slice().sort().join(',') : '';
+      const newSelected = body.selectedStudentUids.slice().sort().join(',');
+      if (oldSelected !== newSelected) {
+        changedDetails.push(`Assigned Candidate List updated (${body.selectedStudentUids.length} students)`);
+      }
+    }
+
+    // 15. Status
+    if (body.status !== undefined && body.status !== oldData.status) {
       changedDetails.push(`Status: ${oldData.status || 'draft'} → ${body.status}`);
     }
 
+    // 16. Questions array update (if passed in request body)
+    if (Array.isArray(body.questions)) {
+      const incomingQCount = body.questions.length;
+      if (incomingQCount !== oldQCount && !changedDetails.some(d => d.startsWith('Total Questions:'))) {
+        changedDetails.push(`Total Questions: ${oldQCount} → ${incomingQCount}`);
+      } else if (!changedDetails.some(d => d.startsWith('Total Questions:'))) {
+        changedDetails.push(`Assessment questions updated (${incomingQCount} questions)`);
+      }
+    }
+
+    // Prepare cleaned update payload for tests document (strip questions array if separate)
+    const { questions: incomingQuestions, ...docPayload } = body;
+
     const updatePayload: any = {
-      ...body,
+      ...docPayload,
       updatedAt: admin.firestore.Timestamp.now(),
     };
 
+    // Save test doc to Firestore first
     await testDocRef.set(updatePayload, { merge: true });
+
+    // If questions were provided, save them into questions subcollection
+    if (Array.isArray(incomingQuestions)) {
+      const existingQSnap = await testDocRef.collection('questions').get();
+      const existingQIds = new Set(existingQSnap.docs.map(d => d.id));
+      const incomingQIds = new Set(incomingQuestions.map((q: any) => q.id || ''));
+
+      const batch = adminDb!.batch();
+
+      // Delete questions no longer present
+      existingQSnap.docs.forEach(docSnap => {
+        if (!incomingQIds.has(docSnap.id)) {
+          batch.delete(docSnap.ref);
+        }
+      });
+
+      // Write updated/new questions
+      incomingQuestions.forEach((q: any) => {
+        const qId = q.id || testDocRef.collection('questions').doc().id;
+        const qRef = testDocRef.collection('questions').doc(qId);
+        batch.set(qRef, {
+          id: qId,
+          questionText: q.questionText || '',
+          options: q.options || {},
+          correctAnswer: q.correctAnswer || '',
+          marks: Number(q.marks) || 1,
+          negativeMarks: Number(q.negativeMarks) || 0,
+          explanation: q.explanation || '',
+        });
+      });
+
+      await batch.commit();
+    }
 
     // Handle student assignments update if provided
     if (body.assignmentType === 'selected' && Array.isArray(body.selectedStudentUids)) {
@@ -288,25 +474,37 @@ router.put('/:testId', requireAuth, requireAdmin, async (req: AuthRequest, res: 
       }
     }
 
-    // Trigger async Brevo emails if there are meaningful change details
+    // Authoritative resolution of updated question count & marks
+    const { totalQuestions: finalQCount, totalMarks: finalTotalMarks } = await resolveTestQuestionsAndMarks(testDocRef, updatePayload);
+    await testDocRef.set({ totalQuestions: finalQCount, totalMarks: finalTotalMarks }, { merge: true });
+
+    // Trigger Brevo emails if there are student-visible changes on a published/scheduled test
     const finalTitle = body.title || oldData.title || 'Assessment';
     try {
-      await triggerTestUpdateEmailsAsync(testId, finalTitle, changedDetails, updatePayload);
+      await triggerTestUpdateEmailsAsync(testId, finalTitle, changedDetails, {
+        ...updatePayload,
+        totalQuestions: finalQCount,
+        totalMarks: finalTotalMarks,
+      });
     } catch (emailErr: any) {
       console.error('Email dispatch failed:', emailErr);
-      res.status(500).json({ success: false, message: 'Test updated in database, but failed to send update emails: ' + emailErr.message });
+      res.status(500).json({
+        success: false,
+        message: 'Test updated in database, but failed to send update emails: ' + emailErr.message,
+      });
       return;
     }
 
-    // Respond to Admin UI after email finishes
     res.json({
       success: true,
       message: 'Test updated successfully and emails dispatched.',
       changedDetails,
+      totalQuestions: finalQCount,
+      totalMarks: finalTotalMarks,
     });
   } catch (error: any) {
     console.error('Update test error:', error);
-    res.status(500).json({ success: false, message: 'Failed to update test.' });
+    res.status(500).json({ success: false, message: 'Failed to update test: ' + (error?.message || error) });
   }
 });
 
@@ -325,21 +523,12 @@ router.patch('/:testId/publish', requireAuth, requireAdmin, async (req: AuthRequ
 
     const testData = testSnap.data() || {};
 
-    // Validate that questions exist in subcollection
-    const questionsSnap = await testDocRef.collection('questions').get();
-    if (questionsSnap.empty) {
+    // Validate that questions exist in subcollection or root
+    const { totalQuestions, totalMarks } = await resolveTestQuestionsAndMarks(testDocRef, testData);
+    if (totalQuestions === 0) {
       res.status(400).json({ success: false, message: 'Cannot publish a test with zero questions. Please add questions first.' });
       return;
     }
-
-    // Determine counts and marks sum to update test doc
-    let totalQuestions = 0;
-    let totalMarks = 0;
-    questionsSnap.forEach(qDoc => {
-      const q = qDoc.data();
-      totalQuestions++;
-      totalMarks += (q.marks || 0);
-    });
 
     // Check if immediate or scheduled availability window details
     const availabilityType = testData.availabilityType || 'immediate';
