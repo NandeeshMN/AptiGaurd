@@ -13,7 +13,7 @@ import { CreateTestView } from './CreateTestView';
 // import { Footer } from '../components/Footer';
 import { useActionConfirmation } from '../context/ActionConfirmationContext';
 import { API_BASE_URL } from '../config/api';
-import { collection, getDocs, doc, getDoc, query, where, onSnapshot, updateDoc, setDoc, serverTimestamp, writeBatch, getCountFromServer } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, query, where, onSnapshot, updateDoc, setDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { formatDateToDDMMYYYY, formatTimeTo12Hour } from '../utils/timeFormat';
 import { Clock, Activity, CalendarDays } from 'lucide-react';
@@ -75,31 +75,88 @@ export function getAdminTestLifecycleStatus(t: any, nowMs: number = Date.now()):
 }
 
 const AdminTestOverviewCard: React.FC<{ test: any, onManage: (id: string) => void, onView: (id: string) => void, onMonitor: (id: string) => void }> = ({ test, onManage, onView, onMonitor }) => {
-  const [assignedCount, setAssignedCount] = React.useState<number>(0);
+  const [assignedUids, setAssignedUids] = React.useState<Set<string>>(new Set());
   const [startedCount, setStartedCount] = React.useState<number>(0);
   const lifecycle = getAdminTestLifecycleStatus(test);
 
+  // 1. Sync/listen to assigned students
   React.useEffect(() => {
     let active = true;
-    const fetchCounts = async () => {
-      try {
-        if (test.assignmentType === 'all') {
-          // It's assigned to all, so we can't easily get the count without fetching users, we'll handle this in UI
-        } else {
-          const assignSnap = await getCountFromServer(collection(db, 'tests', test.id, 'assignedStudents'));
-          if (active) setAssignedCount(assignSnap.data().count);
-        }
+    let unsub: (() => void) | null = null;
 
-        const q = query(collection(db, 'testAttempts'), where('testId', '==', test.id));
-        const startedSnap = await getCountFromServer(q);
-        if (active) setStartedCount(startedSnap.data().count);
-      } catch (err) {
-        console.warn('Failed to fetch counts for overview card', err);
-      }
+    if (test.assignmentType === 'all') {
+      getDocs(query(collection(db, 'users'), where('role', '==', 'student'))).then((usersSnap) => {
+        const uids = new Set<string>();
+        usersSnap.forEach((d) => {
+          const uData = d.data();
+          if (uData.status !== 'archived' && uData.status !== 'graduated') {
+            uids.add(d.id);
+          }
+        });
+        if (active) setAssignedUids(uids);
+      });
+    } else {
+      unsub = onSnapshot(collection(db, 'tests', test.id, 'assignedStudents'), (snap) => {
+        const uids = new Set<string>();
+        snap.forEach((d) => {
+          const uData = d.data();
+          const uid = uData.uid || uData.userId || d.id;
+          if (uid) uids.add(uid);
+        });
+        if (active) setAssignedUids(uids);
+      });
+    }
+
+    return () => {
+      active = false;
+      if (unsub) unsub();
     };
-    fetchCounts();
-    return () => { active = false; };
   }, [test.id, test.assignmentType]);
+
+  // 2. Listen to attempts and count started students
+  React.useEffect(() => {
+    if (assignedUids.size === 0) {
+      setStartedCount(0);
+      return;
+    }
+
+    let active = true;
+    const q = query(collection(db, 'testAttempts'), where('testId', '==', test.id));
+    const unsub = onSnapshot(q, (snap) => {
+      const userAttemptsMap = new Map<string, any>();
+      snap.forEach((d) => {
+        const att = d.data();
+        const uid = att.userId;
+        if (uid) {
+          const existing = userAttemptsMap.get(uid);
+          const isNewStarted = att.status === 'in_progress' || att.status === 'submitted' || att.status === 'auto_submitted';
+          const isExistingStarted = existing?.status === 'in_progress' || existing?.status === 'submitted' || existing?.status === 'auto_submitted';
+          
+          if (isNewStarted || !existing || (!isExistingStarted && !isNewStarted)) {
+            userAttemptsMap.set(uid, att);
+          }
+        }
+      });
+
+      let started = 0;
+      assignedUids.forEach((uid) => {
+        const att = userAttemptsMap.get(uid);
+        if (att) {
+          const status = att.status;
+          if (status === 'in_progress' || status === 'submitted' || status === 'auto_submitted') {
+            started++;
+          }
+        }
+      });
+
+      if (active) setStartedCount(started);
+    });
+
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, [test.id, assignedUids]);
 
   const sDate = test.startDate ? formatDateToDDMMYYYY(test.startDate) : 'Today';
   const sTime = test.startTime ? formatTimeTo12Hour(test.startTime) : '';
@@ -133,7 +190,7 @@ const AdminTestOverviewCard: React.FC<{ test: any, onManage: (id: string) => voi
           {test.assignmentType === 'all' ? (
             `${startedCount} started`
           ) : (
-            lifecycle === 'in_progress' ? `${startedCount} / ${assignedCount} students started` : `${assignedCount} Students Assigned`
+            lifecycle === 'in_progress' ? `${startedCount} / ${assignedUids.size} students started` : `${assignedUids.size} Students Assigned`
           )}
         </p>
       </div>

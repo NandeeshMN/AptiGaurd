@@ -126,7 +126,19 @@ export const AdminMonitorView: React.FC = () => {
     const q = query(collection(db, 'testAttempts'), where('testId', '==', testId));
     const unsub = onSnapshot(q, (snap) => {
       const m = new Map<string, any>();
-      snap.forEach((d) => m.set(d.data().userId, { id: d.id, ...d.data() }));
+      snap.forEach((d) => {
+        const att = d.data();
+        const uid = att.userId;
+        if (uid) {
+          const existing = m.get(uid);
+          const isNewStarted = att.status === 'in_progress' || att.status === 'submitted' || att.status === 'auto_submitted';
+          const isExistingStarted = existing?.status === 'in_progress' || existing?.status === 'submitted' || existing?.status === 'auto_submitted';
+          
+          if (isNewStarted || !existing || (!isExistingStarted && !isNewStarted)) {
+            m.set(uid, { id: d.id, ...att });
+          }
+        }
+      });
       setAttempts(m);
       setLastUpdated(new Date());
       setLoading(false);
@@ -138,7 +150,6 @@ export const AdminMonitorView: React.FC = () => {
 
   const buildRows = (): StudentRow[] => {
     const rows: StudentRow[] = [];
-    const seen = new Set<string>();
 
     const resolveUserInfo = (uid: string, att?: any) => {
       const user = allUsers.get(uid);
@@ -158,30 +169,24 @@ export const AdminMonitorView: React.FC = () => {
       return 'not_started';
     };
 
-    // First: iterate assigned students
-    for (const assigned of assignedStudents) {
-      const uid = assigned.uid || assigned.userId || assigned.id;
-      if (!uid) continue;
-      seen.add(uid);
-      const att = attempts.get(uid);
-      const { name, uucmsNo } = resolveUserInfo(uid, att);
-      rows.push({
-        uid,
-        name,
-        uucmsNo,
-        status: resolveStatus(att),
-        startedAtMs: att?.startedAtMs ?? null,
-        submittedAtMs: att?.submittedAt?.seconds
-          ? att.submittedAt.seconds * 1000
-          : (att?.submittedAtMs ?? null),
-        exitCount: att?.exitCount ?? 0,
-        submissionReason: att?.submissionReason ?? null,
+    // 1. Determine assigned student UIDs
+    const assignedUids = new Set<string>();
+    if (test?.assignmentType === 'all') {
+      allUsers.forEach((user, uid) => {
+        if (user.role === 'student' && user.status !== 'archived' && user.status !== 'graduated') {
+          assignedUids.add(uid);
+        }
+      });
+    } else {
+      assignedStudents.forEach((assigned) => {
+        const uid = assigned.uid || assigned.userId || assigned.id;
+        if (uid) assignedUids.add(uid);
       });
     }
 
-    // Then: students with attempts but not in assigned list (e.g. "all" assignment type)
-    attempts.forEach((att, uid) => {
-      if (seen.has(uid)) return;
+    // 2. Iterate assigned students
+    assignedUids.forEach((uid) => {
+      const att = attempts.get(uid);
       const { name, uucmsNo } = resolveUserInfo(uid, att);
       rows.push({
         uid,
@@ -208,9 +213,7 @@ export const AdminMonitorView: React.FC = () => {
 
   // ─── Stats ─────────────────────────────────────────────────────────────────
 
-  const totalAssigned = test?.assignmentType === 'all'
-    ? rows.length
-    : (assignedStudents.length || rows.length);
+  const totalAssigned = rows.length;
   const notStarted = rows.filter((r) => r.status === 'not_started').length;
   const inProgress = rows.filter((r) => r.status === 'in_progress').length;
   const submitted = rows.filter((r) => r.status === 'submitted').length;
