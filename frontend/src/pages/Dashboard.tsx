@@ -129,11 +129,14 @@ const AdminTestOverviewCard: React.FC<{ test: any, onManage: (id: string) => voi
         const uid = att.userId;
         if (uid) {
           const existing = userAttemptsMap.get(uid);
-          const isNewStarted = att.status === 'in_progress' || att.status === 'submitted' || att.status === 'auto_submitted';
-          const isExistingStarted = existing?.status === 'in_progress' || existing?.status === 'submitted' || existing?.status === 'auto_submitted';
-          
-          if (isNewStarted || !existing || (!isExistingStarted && !isNewStarted)) {
+          if (!existing) {
             userAttemptsMap.set(uid, att);
+          } else {
+            const existingTime = existing.startedAtMs || (existing.startedAt?.seconds ? existing.startedAt.seconds * 1000 : 0);
+            const newTime = att.startedAtMs || (att.startedAt?.seconds ? att.startedAt.seconds * 1000 : 0);
+            if (newTime > existingTime) {
+              userAttemptsMap.set(uid, att);
+            }
           }
         }
       });

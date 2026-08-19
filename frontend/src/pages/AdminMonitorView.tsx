@@ -3,11 +3,9 @@ import { useParams } from 'react-router-dom';
 import {
   collection,
   doc,
-  getDoc,
   onSnapshot,
   query,
   where,
-  getDocs,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import {
@@ -84,14 +82,15 @@ export const AdminMonitorView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
 
-  // 1. Load test details
+  // 1. Load test details in real-time
   useEffect(() => {
     if (!testId) return;
-    getDoc(doc(db, 'tests', testId)).then((snap) => {
+    const unsub = onSnapshot(doc(db, 'tests', testId), (snap) => {
       if (snap.exists()) {
         setTest({ id: snap.id, ...snap.data() });
       }
     });
+    return unsub;
   }, [testId]);
 
   // 2. Load all users (to resolve names + uucmsNo)
@@ -104,20 +103,15 @@ export const AdminMonitorView: React.FC = () => {
     return unsub;
   }, []);
 
-  // 3. Load assigned students (subcollection)
+  // 3. Load assigned students in real-time
   useEffect(() => {
     if (!testId) return;
-    const fetchAssigned = async () => {
-      try {
-        const snap = await getDocs(collection(db, 'tests', testId, 'assignedStudents'));
-        const list: any[] = [];
-        snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-        setAssignedStudents(list);
-      } catch {
-        setAssignedStudents([]);
-      }
-    };
-    fetchAssigned();
+    const unsub = onSnapshot(collection(db, 'tests', testId, 'assignedStudents'), (snap) => {
+      const list: any[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setAssignedStudents(list);
+    }, () => setAssignedStudents([]));
+    return unsub;
   }, [testId]);
 
   // 4. Real-time listener for testAttempts for this specific test
@@ -131,11 +125,14 @@ export const AdminMonitorView: React.FC = () => {
         const uid = att.userId;
         if (uid) {
           const existing = m.get(uid);
-          const isNewStarted = att.status === 'in_progress' || att.status === 'submitted' || att.status === 'auto_submitted';
-          const isExistingStarted = existing?.status === 'in_progress' || existing?.status === 'submitted' || existing?.status === 'auto_submitted';
-          
-          if (isNewStarted || !existing || (!isExistingStarted && !isNewStarted)) {
+          if (!existing) {
             m.set(uid, { id: d.id, ...att });
+          } else {
+            const existingTime = existing.startedAtMs || (existing.startedAt?.seconds ? existing.startedAt.seconds * 1000 : 0);
+            const newTime = att.startedAtMs || (att.startedAt?.seconds ? att.startedAt.seconds * 1000 : 0);
+            if (newTime > existingTime) {
+              m.set(uid, { id: d.id, ...att });
+            }
           }
         }
       });
