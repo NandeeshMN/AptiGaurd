@@ -11,6 +11,7 @@ import * as XLSX from 'xlsx';
 interface AuthorizedStudent {
   id: string;
   uucmsNo: string;
+  fullName?: string;
   year: '1st Year' | '2nd Year';
   status: 'active' | 'graduated';
   registered: boolean;
@@ -34,6 +35,7 @@ export const AdminStudentsView = () => {
   const [studentToArchive, setStudentToArchive] = useState<string | null>(null);
   const [studentToUnarchive, setStudentToUnarchive] = useState<string | null>(null);
   
+  const [newFullName, setNewFullName] = useState('');
   const [newUucms, setNewUucms] = useState('');
   const [newYear, setNewYear] = useState<'1st Year' | '2nd Year'>('1st Year');
   const [addLoading, setAddLoading] = useState(false);
@@ -60,7 +62,7 @@ export const AdminStudentsView = () => {
 
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUucms.trim()) return;
+    if (!newFullName.trim() || !newUucms.trim()) return;
     
     setAddLoading(true);
     setErrorMsg('');
@@ -72,7 +74,7 @@ export const AdminStudentsView = () => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ uucmsNo: newUucms, year: newYear })
+        body: JSON.stringify({ fullName: newFullName, uucmsNo: newUucms, year: newYear })
       });
       
       const data = await res.json();
@@ -81,6 +83,7 @@ export const AdminStudentsView = () => {
       }
       
       setShowAddModal(false);
+      setNewFullName('');
       setNewUucms('');
       setToastMsg('Student added successfully.');
     } catch (error: any) {
@@ -241,7 +244,11 @@ export const AdminStudentsView = () => {
   };
 
   const handleDownloadTemplate = () => {
-    const ws = XLSX.utils.aoa_to_sheet([['UUCMS No.', 'Year'], ['P01', '1st Year']]);
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Full Name', 'UUCMS No', 'Year'],
+      ['Nandeesh M N', 'PO2DR24S126012', '1st Year'],
+      ['Rahul Kumar', 'PO2DR24S126013', '1st Year']
+    ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Template');
     XLSX.writeFile(wb, 'student_import_template.xlsx');
@@ -261,12 +268,25 @@ export const AdminStudentsView = () => {
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws) as any[];
+        
+        // Validate columns
+        const rowsJson = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[];
+        if (rowsJson.length === 0) {
+          throw new Error('Excel sheet is empty.');
+        }
+        const headers = rowsJson[0] as string[];
+        const required = ['Full Name', 'UUCMS No', 'Year'];
+        const missing = required.filter(r => !headers.includes(r));
+        if (missing.length > 0) {
+          throw new Error(`Invalid columns. Excel must contain exactly: "Full Name", "UUCMS No", and "Year". Missing: ${missing.join(', ')}`);
+        }
 
+        const data = XLSX.utils.sheet_to_json(ws) as any[];
         const parsedStudents = data.map((row) => ({
-          uucmsNo: row['UUCMS No.'] || row['uucmsNo'] || row['UUCMS'],
-          year: row['Year'] || row['year'],
-        })).filter(s => s.uucmsNo && s.year);
+          fullName: row['Full Name'] ? String(row['Full Name']).trim() : '',
+          uucmsNo: row['UUCMS No'] ? String(row['UUCMS No']).trim() : '',
+          year: row['Year'] ? String(row['Year']).trim() : '',
+        })).filter(s => s.fullName || s.uucmsNo || s.year);
 
         if (parsedStudents.length === 0) {
           throw new Error('No valid student data found. Please use the template.');
@@ -284,10 +304,13 @@ export const AdminStudentsView = () => {
 
         const result = await res.json();
         if (!res.ok || !result.success) {
+          if (result.errors && Array.isArray(result.errors)) {
+            throw new Error(`Excel validation failed:\n${result.errors.join('\n')}`);
+          }
           throw new Error(result.message || 'Failed to import students');
         }
 
-        setToastMsg(`Import complete. Added: ${result.results?.added || 0}, Skipped (Duplicates): ${result.results?.duplicates || 0}`);
+        setToastMsg(`Import complete. Successfully authorized ${result.results?.added || 0} students.`);
         setShowImportModal(false);
       } catch (err: any) {
         setErrorMsg(err.message || 'Error processing file');
@@ -305,7 +328,9 @@ export const AdminStudentsView = () => {
   };
 
   const filteredStudents = students.filter(s => {
-    const matchesSearch = s.uucmsNo.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = 
+      s.uucmsNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (s.fullName || '').toLowerCase().includes(searchQuery.toLowerCase());
     if (activeTab === 'Archived') {
       return s.status === 'graduated' && matchesSearch;
     }
@@ -401,7 +426,7 @@ export const AdminStudentsView = () => {
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search by UUCMS No..."
+              placeholder="Search by Name or UUCMS No..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0952cc]/20 focus:border-[#0952cc] transition-all"
@@ -416,26 +441,31 @@ export const AdminStudentsView = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50 border-b border-slate-200">
+                <th className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Full Name</th>
                 <th className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider">UUCMS No.</th>
                 <th className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Year</th>
                 <th className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Registration Status</th>
+                <th className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Student Status</th>
                 <th className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-12 text-center text-sm text-slate-500">Loading students...</td>
+                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-500">Loading students...</td>
                 </tr>
               ) : filteredStudents.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-12 text-center text-sm text-slate-500">No active students found for this year.</td>
+                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-500">No active students found for this year.</td>
                 </tr>
               ) : (
                 filteredStudents.map((student) => (
                   <tr key={student.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-6 py-4">
-                      <div className="font-semibold text-slate-900">{student.uucmsNo}</div>
+                      <div className="font-semibold text-slate-900">{student.fullName || '—'}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="font-mono text-sm text-slate-600">{student.uucmsNo}</div>
                     </td>
                     <td className="px-6 py-4">
                       <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-100 text-slate-700">
@@ -450,6 +480,17 @@ export const AdminStudentsView = () => {
                       ) : (
                         <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200/60">
                           Not Registered
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {student.status === 'graduated' ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-red-50 text-red-700 border border-red-200/60">
+                          Graduated
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                          Active
                         </span>
                       )}
                     </td>
@@ -495,6 +536,17 @@ export const AdminStudentsView = () => {
                 </div>
               )}
               <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={newFullName}
+                    onChange={(e) => setNewFullName(e.target.value)}
+                    placeholder="Enter student full name"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0952cc]/20 focus:border-[#0952cc]"
+                  />
+                </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1">UUCMS Number</label>
                   <input
@@ -569,7 +621,7 @@ export const AdminStudentsView = () => {
                 </div>
               )}
               <p className="text-sm text-slate-500 mb-6">
-                Upload an Excel file containing exactly "UUCMS No." and "Year" columns. Valid year values are "1st Year" or "2nd Year".
+                Upload an Excel file containing exactly "Full Name", "UUCMS No", and "Year" columns. Valid year values are "1st Year" or "2nd Year".
               </p>
               
               <div className="relative border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors">

@@ -111,19 +111,31 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
     const uucmsSnap = await uucmsRef.get();
 
     if (!uucmsSnap.exists) {
-      res.status(400).json({ success: false, message: 'Your UUCMS number is not registered. Please contact your administrator.' });
+      res.status(400).json({ success: false, message: 'UUCMS number is not authorized. Please contact the administrator.' });
       return;
     }
 
     const authData = uucmsSnap.data();
 
     if (authData?.status !== 'active') {
-      res.status(400).json({ success: false, message: 'Your UUCMS number is not active. Please contact your administrator.' });
+      res.status(400).json({ success: false, message: 'This UUCMS number is currently inactive.' });
       return;
     }
 
     if (authData?.registered === true) {
-      res.status(400).json({ success: false, message: 'This UUCMS number is already registered.' });
+      res.status(400).json({ success: false, message: 'This UUCMS number is already registered. Please contact the administrator if you believe this is incorrect.' });
+      return;
+    }
+
+    const normalizeName = (name: string): string => {
+      return name.toLowerCase().trim().replace(/\s+/g, ' ');
+    };
+
+    const normEnteredName = normalizeName(fullName);
+    const normStoredName = normalizeName(authData?.fullName || '');
+
+    if (normEnteredName !== normStoredName) {
+      res.status(400).json({ success: false, message: 'The Full Name does not match the records for this UUCMS number.' });
       return;
     }
 
@@ -139,8 +151,8 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
     // Create user profile in Firestore
     await adminDb.collection('users').doc(userRecord.uid).set({
       uid: userRecord.uid,
-      name: fullName,
       fullName: fullName,
+      name: fullName,
       email: sanitizedEmail,
       uucmsNo: sanitizedUucmsNo,
       role: 'student',

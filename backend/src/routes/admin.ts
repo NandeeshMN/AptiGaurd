@@ -12,13 +12,14 @@ const router = Router();
  * Manually add an authorized student UUCMS
  */
 router.post('/students/add', async (req: Request, res: Response): Promise<void> => {
-  const { uucmsNo, year } = req.body;
+  const { fullName, uucmsNo, year } = req.body;
 
-  if (!uucmsNo || !year) {
-    res.status(400).json({ success: false, message: 'UUCMS Number and Year are required.' });
+  if (!fullName || !uucmsNo || !year) {
+    res.status(400).json({ success: false, message: 'Full Name, UUCMS Number, and Year are required.' });
     return;
   }
 
+  const sanitizedFullName = String(fullName).trim();
   const sanitizedUucmsNo = String(uucmsNo).trim();
   
   if (!adminDb) {
@@ -36,6 +37,7 @@ router.post('/students/add', async (req: Request, res: Response): Promise<void> 
     }
 
     await docRef.set({
+      fullName: sanitizedFullName,
       uucmsNo: sanitizedUucmsNo,
       year: year,
       status: 'active',
@@ -75,12 +77,8 @@ router.get('/students', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-/**
- * POST /api/admin/students/import
- * Bulk import from Excel
- */
 router.post('/students/import', async (req: Request, res: Response): Promise<void> => {
-  const { students } = req.body; // Expects an array of { uucmsNo, year }
+  const { students } = req.body; // Expects an array of { fullName, uucmsNo, year }
 
   if (!Array.isArray(students) || students.length === 0) {
     res.status(400).json({ success: false, message: 'Valid students array is required.' });
@@ -93,66 +91,90 @@ router.post('/students/import', async (req: Request, res: Response): Promise<voi
   }
 
   try {
-    const batch = adminDb.batch();
-    const results = {
-      added: 0,
-      skipped: 0,
-      duplicates: 0,
-      invalid: 0
-    };
-
+    const errors: string[] = [];
     const seenUucms = new Set<string>();
 
-    for (const student of students) {
-      if (!student.uucmsNo || !student.year || (student.year !== '1st Year' && student.year !== '2nd Year')) {
-        results.invalid++;
-        continue;
+    students.forEach((student, index) => {
+      const rowNum = index + 2; // Row 1 is header
+      const name = student.fullName ? String(student.fullName).trim() : '';
+      const uucms = student.uucmsNo ? String(student.uucmsNo).trim() : '';
+      const yr = student.year ? String(student.year).trim() : '';
+
+      if (!name) {
+        errors.push(`Row ${rowNum}: "Full Name" is empty.`);
+      }
+      if (!uucms) {
+        errors.push(`Row ${rowNum}: "UUCMS No" is empty.`);
+      }
+      if (!yr) {
+        errors.push(`Row ${rowNum}: "Year" is empty.`);
+      } else if (yr !== '1st Year' && yr !== '2nd Year') {
+        errors.push(`Row ${rowNum}: Invalid Year value "${yr}". Must be "1st Year" or "2nd Year".`);
       }
 
-      const sanitizedUucms = String(student.uucmsNo).trim();
-      
-      if (seenUucms.has(sanitizedUucms)) {
-        results.duplicates++;
-        continue;
+      if (uucms) {
+        if (seenUucms.has(uucms)) {
+          errors.push(`Row ${rowNum}: Duplicate UUCMS number "${uucms}".`);
+        }
+        seenUucms.add(uucms);
       }
-      seenUucms.add(sanitizedUucms);
+    });
+
+    if (errors.length > 0) {
+      res.status(400).json({ success: false, message: 'Excel validation failed.', errors });
+      return;
+    }
+
+    const batch = adminDb.batch();
+    let addedCount = 0;
+
+    for (const student of students) {
+      const sanitizedName = String(student.fullName).trim();
+      const sanitizedUucms = String(student.uucmsNo).trim();
+      const sanitizedYear = String(student.year).trim();
 
       const docRef = adminDb.collection('authorizedStudents').doc(sanitizedUucms);
       const docSnap = await docRef.get();
 
       if (docSnap.exists) {
-        results.skipped++;
+        const existingData = docSnap.data() || {};
+        batch.set(docRef, {
+          ...existingData,
+          fullName: sanitizedName,
+          uucmsNo: sanitizedUucms,
+          year: sanitizedYear,
+          status: existingData.status || 'active',
+          registered: existingData.registered !== undefined ? existingData.registered : false,
+          uid: existingData.uid !== undefined ? existingData.uid : null,
+          updatedAt: new Date(),
+        });
       } else {
         batch.set(docRef, {
+          fullName: sanitizedName,
           uucmsNo: sanitizedUucms,
-          year: student.year,
+          year: sanitizedYear,
           status: 'active',
           registered: false,
           uid: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         });
-        results.added++;
       }
+      addedCount++;
     }
 
-    if (results.added > 0) {
-      await batch.commit();
-    }
+    await batch.commit();
 
     res.json({ 
       success: true, 
-      message: 'Import completed.', 
+      message: `Import completed. Successfully authorized ${addedCount} students.`, 
       results: {
-        added: results.added,
-        skipped: results.skipped,
-        duplicates: results.duplicates,
-        invalid: results.invalid
+        added: addedCount
       }
     });
   } catch (error) {
     console.error('Error importing students:', error);
-    res.status(500).json({ success: false, message: 'Internal server error' });
+    res.status(500).json({ success: false, message: 'Internal server error while importing.' });
   }
 });
 
