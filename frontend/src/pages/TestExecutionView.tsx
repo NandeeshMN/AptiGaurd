@@ -857,14 +857,14 @@ export const TestExecutionView: React.FC = () => {
           <div className="flex gap-3 pt-2">
             <button
               onClick={() => navigate('/dashboard')}
-              className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-colors"
+              className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               onClick={handleStartTest}
               disabled={!agreedInstructions}
-              className="flex-1 py-2.5 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white text-xs font-bold rounded-xl uppercase tracking-wider transition-colors shadow-sm focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="flex-1 py-2.5 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white text-xs font-bold rounded-xl uppercase tracking-wider transition-colors shadow-sm focus:outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               <Maximize className="w-4 h-4" /> Start Test Now
             </button>
