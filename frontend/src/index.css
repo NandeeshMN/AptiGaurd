@@ -10,3 +10,12 @@ body {
   background-color: #f3f6fc;
   color: #0f172a;
 }
+
+/* Hide native browser password reveal/clear buttons to avoid duplicate icons */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none !important;
+  width: 0;
+  height: 0;
+}
+
