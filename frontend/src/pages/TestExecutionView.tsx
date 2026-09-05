@@ -126,6 +126,12 @@ export const TestExecutionView: React.FC = () => {
   const hasSubmittedRef = useRef<boolean>(false);
   const [showCameraModal, setShowCameraModal] = useState<boolean>(false);
   const recordViolationRef = useRef<((type: 'fullscreen_exit' | 'tab_switch' | 'window_blur' | 'camera_interrupted') => void) | null>(null);
+  const violationBreakdownRef = useRef<Record<string, number>>({
+    camera: 0,
+    fullscreen: 0,
+    tab: 0,
+    blur: 0,
+  });
 
   // Camera Management Hook for Live Proctoring
   const {
@@ -133,7 +139,7 @@ export const TestExecutionView: React.FC = () => {
     isCameraActive,
     cameraError,
     isRequesting: isCameraRequesting,
-    requestCameraAccess,
+    requestCameraAccess: rawRequestCameraAccess,
     stopCamera,
   } = useCamera({
     onInterrupted: () => {
@@ -142,6 +148,17 @@ export const TestExecutionView: React.FC = () => {
       }
     },
   });
+
+  const requestCameraAccess = useCallback(async () => {
+    const s = await rawRequestCameraAccess();
+    if (s && attemptId && viewMode === 'active') {
+      updateDoc(doc(db, 'testAttempts', attemptId), {
+        cameraStatus: 'active',
+        lastCameraUpdate: serverTimestamp(),
+      }).catch(() => {});
+    }
+    return s;
+  }, [rawRequestCameraAccess, attemptId, viewMode]);
 
   // Download Purpose-Built PNG Result Card using Canvas 2D engine
   const handleDownloadResultCardPNG = () => {
@@ -278,6 +295,10 @@ export const TestExecutionView: React.FC = () => {
               console.warn('[RestoreAnswers] Notice fetching answers subcollection:', ansErr);
             }
 
+            if (activeDocSnap.violationBreakdown) {
+              violationBreakdownRef.current = { ...activeDocSnap.violationBreakdown };
+            }
+
             setAnswers(restoredAnswers);
             setViewMode('active');
             setLoading(false);
@@ -351,6 +372,8 @@ export const TestExecutionView: React.FC = () => {
       const newAttemptRef = doc(collection(db, 'testAttempts'));
       const newAttemptId = newAttemptRef.id;
 
+      violationBreakdownRef.current = { camera: 0, fullscreen: 0, tab: 0, blur: 0 };
+
       const attemptPayload = {
         userId: currentUser.uid,
         userEmail: currentUser.email || '',
@@ -364,6 +387,14 @@ export const TestExecutionView: React.FC = () => {
         expiresAtMs: effectiveExpMs,
         submittedAt: null,
         status: 'in_progress',
+        cameraStatus: 'active',
+        lastCameraUpdate: serverTimestamp(),
+        violationBreakdown: {
+          camera: 0,
+          fullscreen: 0,
+          tab: 0,
+          blur: 0,
+        },
         currentQuestion: 0,
         exitCount: 0,
         totalQuestions: questions.length,
@@ -539,6 +570,14 @@ export const TestExecutionView: React.FC = () => {
       const newExitCount = exitCount + 1;
       setExitCount(newExitCount);
 
+      let bKey = 'fullscreen';
+      if (type === 'camera_interrupted') bKey = 'camera';
+      else if (type === 'tab_switch') bKey = 'tab';
+      else if (type === 'window_blur') bKey = 'blur';
+
+      const nextCount = (violationBreakdownRef.current[bKey] || 0) + 1;
+      violationBreakdownRef.current[bKey] = nextCount;
+
       // Log proctoring event to subcollection
       try {
         await addDoc(collection(db, 'testAttempts', attemptId, 'proctoringEvents'), {
@@ -546,7 +585,16 @@ export const TestExecutionView: React.FC = () => {
           timestamp: serverTimestamp(),
           violationNumber: newExitCount,
         });
-        await updateDoc(doc(db, 'testAttempts', attemptId), { exitCount: newExitCount });
+
+        const updateData: any = {
+          exitCount: newExitCount,
+          [`violationBreakdown.${bKey}`]: nextCount,
+        };
+        if (type === 'camera_interrupted') {
+          updateData.cameraStatus = 'inactive';
+          updateData.lastCameraUpdate = serverTimestamp();
+        }
+        await updateDoc(doc(db, 'testAttempts', attemptId), updateData);
       } catch (err) {
         console.error('Error logging proctoring event:', err);
       }
@@ -662,6 +710,7 @@ export const TestExecutionView: React.FC = () => {
     if (hasSubmittedRef.current) return;
     hasSubmittedRef.current = true;
     stopCamera();
+    updateDoc(doc(db, 'testAttempts', attId), { cameraStatus: 'stopped' }).catch(() => {});
 
     try {
       // Exit fullscreen if active

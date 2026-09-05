@@ -20,6 +20,7 @@ import {
   Calendar,
   Timer,
   BookOpen,
+  Camera,
 } from 'lucide-react';
 import { formatTimeTo12Hour, formatDateToDDMMYYYY } from '../utils/timeFormat';
 
@@ -36,6 +37,13 @@ interface StudentRow {
   submittedAtMs: number | null;
   exitCount: number;
   submissionReason: string | null;
+  cameraStatus: 'active' | 'inactive' | 'stopped' | null;
+  violationBreakdown: {
+    camera?: number;
+    fullscreen?: number;
+    tab?: number;
+    blur?: number;
+  } | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -196,6 +204,8 @@ export const AdminMonitorView: React.FC = () => {
           : (att?.submittedAtMs ?? null),
         exitCount: att?.exitCount ?? 0,
         submissionReason: att?.submissionReason ?? null,
+        cameraStatus: att?.cameraStatus ?? (att?.status === 'in_progress' ? 'active' : null),
+        violationBreakdown: att?.violationBreakdown ?? null,
       });
     });
 
@@ -216,6 +226,7 @@ export const AdminMonitorView: React.FC = () => {
   const submitted = rows.filter((r) => r.status === 'submitted').length;
   const autoSubmitted = rows.filter((r) => r.status === 'auto_submitted').length;
   const started = inProgress + submitted + autoSubmitted;
+  const activeCameras = rows.filter((r) => r.status === 'in_progress' && r.cameraStatus !== 'inactive').length;
 
   // ─── Test schedule info ────────────────────────────────────────────────────
 
@@ -302,11 +313,12 @@ export const AdminMonitorView: React.FC = () => {
         )}
 
         {/* Stats Row */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           {[
             { label: 'Total Assigned', value: totalAssigned, icon: Users, color: 'text-slate-600', bg: 'bg-slate-50', border: 'border-slate-200' },
             { label: 'Started', value: started, icon: Activity, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200' },
             { label: 'In Progress', value: inProgress, icon: Clock, color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200' },
+            { label: 'Cameras Active', value: `${activeCameras} / ${inProgress}`, icon: Camera, color: inProgress > 0 && activeCameras < inProgress ? 'text-amber-600' : 'text-emerald-700', bg: inProgress > 0 && activeCameras < inProgress ? 'bg-amber-50' : 'bg-emerald-50', border: inProgress > 0 && activeCameras < inProgress ? 'border-amber-200' : 'border-emerald-200' },
             { label: 'Submitted', value: submitted, icon: CheckCircle2, color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
             { label: 'Auto-Submitted', value: autoSubmitted, icon: AlertTriangle, color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200' },
           ].map(({ label, value, icon: Icon, color, bg, border }) => (
@@ -354,6 +366,7 @@ export const AdminMonitorView: React.FC = () => {
                     <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Student Name</th>
                     <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">UUCMS No.</th>
                     <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
+                    <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Camera</th>
                     <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Start Time</th>
                     <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Submit Time</th>
                     <th className="px-5 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Violations</th>
@@ -373,6 +386,25 @@ export const AdminMonitorView: React.FC = () => {
                           {statusLabel[row.status]}
                         </span>
                       </td>
+                      <td className="px-5 py-3.5">
+                        {row.status === 'in_progress' ? (
+                          row.cameraStatus === 'inactive' ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[10px] font-extrabold bg-red-50 text-red-700 border-red-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                              INTERRUPTED
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border-emerald-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              ACTIVE
+                            </span>
+                          )
+                        ) : row.status === 'submitted' || row.status === 'auto_submitted' ? (
+                          <span className="text-xs text-slate-400 font-medium">Off</span>
+                        ) : (
+                          <span className="text-xs text-slate-400 font-medium">—</span>
+                        )}
+                      </td>
                       <td className="px-5 py-3.5 text-slate-600 font-medium">
                         {row.startedAtMs ? formatMs(row.startedAtMs) : '—'}
                       </td>
@@ -380,11 +412,50 @@ export const AdminMonitorView: React.FC = () => {
                         {row.submittedAtMs ? formatMs(row.submittedAtMs) : '—'}
                       </td>
                       <td className="px-5 py-3.5">
-                        <span className={`text-xs font-bold ${row.exitCount >= 3 ? 'text-red-600' : row.exitCount > 0 ? 'text-amber-700' : 'text-slate-400'}`}>
-                          {row.exitCount} / 3
-                        </span>
-                        {row.submissionReason === 'maximum_exit_limit' && (
-                          <span className="ml-2 text-[10px] text-red-500 font-semibold">(auto)</span>
+                        {row.status === 'not_started' ? (
+                          <span className="text-xs text-slate-400 font-medium">—</span>
+                        ) : row.exitCount === 0 ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-400">0 / 3</span>
+                            <span className="inline-flex items-center text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">
+                              ✓ Clean
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-xs font-bold ${row.exitCount >= 3 ? 'text-red-600' : 'text-amber-700'}`}>
+                                {row.exitCount} / 3
+                              </span>
+                              {row.submissionReason === 'maximum_exit_limit' && (
+                                <span className="text-[10px] text-red-500 font-semibold">(auto)</span>
+                              )}
+                            </div>
+                            {row.violationBreakdown && (
+                              <div className="flex flex-wrap items-center gap-1">
+                                {(row.violationBreakdown.camera ?? 0) > 0 && (
+                                  <span className="inline-flex items-center text-[10px] font-medium bg-red-50 text-red-700 border border-red-200 px-1.5 py-0.5 rounded">
+                                    📷 Camera: {row.violationBreakdown.camera}
+                                  </span>
+                                )}
+                                {(row.violationBreakdown.fullscreen ?? 0) > 0 && (
+                                  <span className="inline-flex items-center text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded">
+                                    🖥️ Screen: {row.violationBreakdown.fullscreen}
+                                  </span>
+                                )}
+                                {(row.violationBreakdown.tab ?? 0) > 0 && (
+                                  <span className="inline-flex items-center text-[10px] font-medium bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded">
+                                    📑 Tab: {row.violationBreakdown.tab}
+                                  </span>
+                                )}
+                                {(row.violationBreakdown.blur ?? 0) > 0 && (
+                                  <span className="inline-flex items-center text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded">
+                                    🔲 Focus: {row.violationBreakdown.blur}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </td>
                     </tr>
