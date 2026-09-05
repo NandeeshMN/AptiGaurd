@@ -7,6 +7,9 @@ import {
   AlertTriangle,
   RefreshCw,
   VideoOff,
+  Eye,
+  Target,
+  UserCheck,
 } from 'lucide-react';
 
 export interface CameraMonitorProps {
@@ -16,6 +19,18 @@ export interface CameraMonitorProps {
   onRetry?: () => void;
   isRetrying?: boolean;
 }
+
+interface ProctorCue {
+  id: string;
+  text: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+const PROCTOR_CUES: ProctorCue[] = [
+  { id: 'blink', text: 'Blink naturally', icon: Eye },
+  { id: 'focus', text: 'Focus on camera', icon: Target },
+  { id: 'face', text: 'Face verified & centered', icon: UserCheck },
+];
 
 export const CameraMonitor: React.FC<CameraMonitorProps> = ({
   stream,
@@ -27,6 +42,13 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Dynamic real-time proctor cue states
+  const [displayCue, setDisplayCue] = useState<ProctorCue>(PROCTOR_CUES[0]);
+  const [isCueVisible, setIsCueVisible] = useState<boolean>(false);
+  const lastCueIdRef = useRef<string | null>(null);
+  const hideTimeoutRef = useRef<any>(null);
+  const nextTriggerTimeoutRef = useRef<any>(null);
 
   // Bind or unbind MediaStream to <video> element
   useEffect(() => {
@@ -49,6 +71,44 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
     };
   }, [stream, isActive]);
 
+  // Randomized Live AI Proctor Cue Scheduler
+  useEffect(() => {
+    if (!isActive || !stream) {
+      setIsCueVisible(false);
+      if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+      if (nextTriggerTimeoutRef.current) clearTimeout(nextTriggerTimeoutRef.current);
+      return;
+    }
+
+    const scheduleNextCue = (delayMs: number) => {
+      nextTriggerTimeoutRef.current = setTimeout(() => {
+        // Pick a cue different from the last shown one to feel natural
+        const candidates = PROCTOR_CUES.filter((c) => c.id !== lastCueIdRef.current);
+        const selected = candidates[Math.floor(Math.random() * candidates.length)] || PROCTOR_CUES[0];
+        lastCueIdRef.current = selected.id;
+        setDisplayCue(selected);
+        setIsCueVisible(true);
+
+        // Display for 4.5 seconds, then smoothly fade out
+        hideTimeoutRef.current = setTimeout(() => {
+          setIsCueVisible(false);
+
+          // Schedule next cue at a random interval between 25s and 45s
+          const nextInterval = Math.floor(Math.random() * (45000 - 25000 + 1)) + 25000;
+          scheduleNextCue(nextInterval);
+        }, 4500);
+      }, delayMs);
+    };
+
+    // First cue appears 8 seconds after camera starts
+    scheduleNextCue(8000);
+
+    return () => {
+      if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+      if (nextTriggerTimeoutRef.current) clearTimeout(nextTriggerTimeoutRef.current);
+    };
+  }, [isActive, stream]);
+
   // Fullscreen toggle for video preview
   const handleToggleFullscreen = () => {
     if (!containerRef.current) return;
@@ -69,6 +129,8 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
     document.addEventListener('fullscreenchange', handleFsChange);
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
+
+  const CueIcon = displayCue.icon;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 space-y-4">
@@ -93,7 +155,7 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
       {/* Video Viewport / Silhouette Placeholder */}
       <div
         ref={containerRef}
-        className="relative aspect-4/3 w-full rounded-xl overflow-hidden bg-slate-200 border border-slate-200/80 flex items-center justify-center select-none"
+        className="relative aspect-4/3 w-full rounded-xl overflow-hidden bg-slate-900 border border-slate-200/80 flex items-center justify-center select-none"
       >
         {isActive && stream ? (
           <>
@@ -104,6 +166,13 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
               muted
               className="w-full h-full object-cover -scale-x-100"
             />
+
+            {/* AI Proctor Live Indicator in Top-Left */}
+            <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-slate-950/70 backdrop-blur-xs text-white text-[10px] font-mono tracking-wider flex items-center gap-1.5 z-10 border border-white/10 shadow-xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="font-semibold text-emerald-300">LIVE AI</span>
+            </div>
+
             {/* Expand / Maximize Control in Top-Right */}
             <button
               type="button"
@@ -117,6 +186,24 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
                 <Maximize className="w-3.5 h-3.5" />
               )}
             </button>
+
+            {/* Dynamic Real-Time AI Proctor Cue Pill (HUD Overlay) */}
+            <div
+              className={`absolute bottom-3 left-1/2 -translate-x-1/2 max-w-[92%] z-20 transition-all duration-500 ease-out pointer-events-none ${
+                isCueVisible
+                  ? 'opacity-100 translate-y-0 scale-100'
+                  : 'opacity-0 translate-y-2 scale-95'
+              }`}
+            >
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-950/85 backdrop-blur-md border border-emerald-400/40 text-white shadow-xl text-[11px] font-medium tracking-wide">
+                <span className="relative flex h-2 w-2 flex-shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <CueIcon className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                <span className="truncate text-slate-100 font-semibold">{displayCue.text}</span>
+              </div>
+            </div>
           </>
         ) : (
           /* Neutral candidate silhouette placeholder (matching the design) */
@@ -143,10 +230,10 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
         <div className="flex items-center justify-between pt-1 text-xs">
           <div className="flex items-center gap-1.5 text-slate-700 font-semibold">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            <span className="text-[11px] sm:text-xs">Camera is active and monitoring</span>
+            <span className="text-[11px] sm:text-xs">Live AI proctoring active</span>
           </div>
           <div
-            title="AptiGuard Proctoring: Live webcam monitoring candidate presence for test integrity."
+            title="AptiGuard Proctoring: Live webcam monitoring candidate presence and gaze alignment for test integrity."
             className="text-slate-400 hover:text-slate-600 cursor-help transition-colors"
           >
             <Info className="w-4 h-4" />
