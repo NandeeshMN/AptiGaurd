@@ -36,9 +36,13 @@ import {
   XCircle,
   HelpCircle,
   Download,
-  MonitorX
+  MonitorX,
+  Camera,
+  RefreshCw,
 } from 'lucide-react';
 import { checkIsMobileDevice } from '../utils/deviceDetection';
+import { useCamera } from '../hooks/useCamera';
+import { CameraMonitor } from '../components/proctoring/CameraMonitor';
 /**
  * Calculates candidate's authoritative effective test expiration timestamp in milliseconds.
  * Caps personal candidate duration by absolute scheduled test end time (for late joiners).
@@ -120,6 +124,24 @@ export const TestExecutionView: React.FC = () => {
   const [isMobileBlocked, setIsMobileBlocked] = useState<boolean>(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const hasSubmittedRef = useRef<boolean>(false);
+  const [showCameraModal, setShowCameraModal] = useState<boolean>(false);
+  const recordViolationRef = useRef<((type: 'fullscreen_exit' | 'tab_switch' | 'window_blur' | 'camera_interrupted') => void) | null>(null);
+
+  // Camera Management Hook for Live Proctoring
+  const {
+    stream: cameraStream,
+    isCameraActive,
+    cameraError,
+    isRequesting: isCameraRequesting,
+    requestCameraAccess,
+    stopCamera,
+  } = useCamera({
+    onInterrupted: () => {
+      if (viewMode === 'active' && !hasSubmittedRef.current) {
+        recordViolationRef.current?.('camera_interrupted');
+      }
+    },
+  });
 
   // Download Purpose-Built PNG Result Card using Canvas 2D engine
   const handleDownloadResultCardPNG = () => {
@@ -259,6 +281,8 @@ export const TestExecutionView: React.FC = () => {
             setAnswers(restoredAnswers);
             setViewMode('active');
             setLoading(false);
+            // Re-acquire camera for the restored active test
+            requestCameraAccess().catch(() => {});
             return;
           }
         }
@@ -275,8 +299,8 @@ export const TestExecutionView: React.FC = () => {
   // -------------------------------------------------------------
   // 2. START NEW TEST ATTEMPT WITH BACKEND AUTHORITATIVE VALIDATION
   // -------------------------------------------------------------
-  const handleStartTest = async () => {
-    if (!agreedInstructions || !testData || !currentUser || !testId) return;
+  const proceedToStartTest = async () => {
+    if (!testData || !currentUser || !testId) return;
 
     try {
       // Call Backend Validation Endpoint first
@@ -298,6 +322,7 @@ export const TestExecutionView: React.FC = () => {
       if (startRes && !startRes.success) {
         if (startRes.message && !startRes.message.includes('Internal server error')) {
           alert(`Cannot start test: ${startRes.message}`);
+          stopCamera();
           navigate('/dashboard');
           return;
         }
@@ -368,6 +393,29 @@ export const TestExecutionView: React.FC = () => {
     } catch (err) {
       console.error('Error starting test attempt:', err);
       alert('Failed to start test attempt. Please check connection.');
+    }
+  };
+
+  const handleStartTest = async () => {
+    if (!agreedInstructions || !testData || !currentUser || !testId) return;
+
+    // Check & request camera permission before beginning test
+    if (!isCameraActive || !cameraStream) {
+      const stream = await requestCameraAccess();
+      if (!stream) {
+        setShowCameraModal(true);
+        return;
+      }
+    }
+
+    await proceedToStartTest();
+  };
+
+  const handleRetryCameraFromModal = async () => {
+    const stream = await requestCameraAccess();
+    if (stream) {
+      setShowCameraModal(false);
+      await proceedToStartTest();
     }
   };
 
@@ -477,11 +525,11 @@ export const TestExecutionView: React.FC = () => {
   };
 
   // -------------------------------------------------------------
-  // 5. PROCTORING & VIOLATION DETECTION (FULLSCREEN / VISIBILITY)
+  // 5. PROCTORING & VIOLATION DETECTION (FULLSCREEN / VISIBILITY / CAMERA)
   // -------------------------------------------------------------
   const recordViolation = useCallback(
-    async (type: 'fullscreen_exit' | 'tab_switch' | 'window_blur') => {
-      if (viewMode !== 'active' || !attemptId || isSubmitting) return;
+    async (type: 'fullscreen_exit' | 'tab_switch' | 'window_blur' | 'camera_interrupted') => {
+      if (viewMode !== 'active' || !attemptId || isSubmitting || hasSubmittedRef.current) return;
 
       const now = Date.now();
       // Debounce duplicate events within 1200ms
@@ -503,24 +551,30 @@ export const TestExecutionView: React.FC = () => {
         console.error('Error logging proctoring event:', err);
       }
 
+      const isCamera = type === 'camera_interrupted';
+
       // Handle 3-exit rule warnings & auto-submission
       if (newExitCount === 1) {
         setWarningModal({
           show: true,
           level: 1,
-          message: '⚠️ Fullscreen Exit / Tab Switch Detected\n\nThis is Warning 1 of 3.\nPlease return to fullscreen mode to continue the test.',
+          message: isCamera
+            ? '⚠️ Camera Access Interrupted\n\nThis is Warning 1 of 3.\nPlease restore your camera feed immediately to continue the test.'
+            : '⚠️ Fullscreen Exit / Tab Switch Detected\n\nThis is Warning 1 of 3.\nPlease return to fullscreen mode to continue the test.',
         });
       } else if (newExitCount === 2) {
         setWarningModal({
           show: true,
           level: 2,
-          message: '⚠️ Second Violation Detected\n\nThis is Warning 2 of 3.\nOne more violation will automatically submit your test!',
+          message: isCamera
+            ? '⚠️ Second Camera Violation Detected\n\nThis is Warning 2 of 3.\nOne more proctoring violation will automatically submit your test!'
+            : '⚠️ Second Violation Detected\n\nThis is Warning 2 of 3.\nOne more violation will automatically submit your test!',
         });
       } else if (newExitCount >= 3) {
         setWarningModal({
           show: true,
           level: 3,
-          message: '🚨 Maximum Violations Reached\n\nYou have exited fullscreen 3 times. Your test is being automatically submitted now.',
+          message: '🚨 Maximum Violations Reached\n\nYou have accumulated 3 proctoring violations. Your test is being automatically submitted now.',
         });
         setTimeout(() => {
           handleAutoSubmit(attemptId, 'maximum_exit_limit', newExitCount, questions, testData);
@@ -529,6 +583,10 @@ export const TestExecutionView: React.FC = () => {
     },
     [viewMode, attemptId, exitCount, isSubmitting, questions, testData]
   );
+
+  useEffect(() => {
+    recordViolationRef.current = recordViolation;
+  }, [recordViolation]);
 
   useEffect(() => {
     if (viewMode !== 'active') return;
@@ -603,6 +661,7 @@ export const TestExecutionView: React.FC = () => {
   ) => {
     if (hasSubmittedRef.current) return;
     hasSubmittedRef.current = true;
+    stopCamera();
 
     try {
       // Exit fullscreen if active
@@ -733,6 +792,9 @@ export const TestExecutionView: React.FC = () => {
     if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
       document.documentElement.requestFullscreen().catch(() => {});
     }
+    if (!isCameraActive) {
+      requestCameraAccess().catch(() => {});
+    }
   };
 
   if (isMobileBlocked) {
@@ -824,7 +886,11 @@ export const TestExecutionView: React.FC = () => {
                 <span>After the <strong>3rd violation</strong>, your assessment will be <strong>automatically submitted</strong>.</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 flex-shrink-0" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#0952cc] mt-1.5 flex-shrink-0" />
+                <span><strong>Live Camera Monitoring</strong> is required. Your camera feed will be monitored throughout the test.</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#0952cc] mt-1.5 flex-shrink-0" />
                 <span>Selected answers are <strong>automatically saved</strong> to the server instantly.</span>
               </li>
               <li className="flex items-start gap-2">
@@ -863,13 +929,77 @@ export const TestExecutionView: React.FC = () => {
             </button>
             <button
               onClick={handleStartTest}
-              disabled={!agreedInstructions}
+              disabled={!agreedInstructions || isCameraRequesting}
               className="flex-1 py-2.5 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white text-xs font-bold rounded-xl uppercase tracking-wider transition-colors shadow-sm focus:outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              <Maximize className="w-4 h-4" /> Start Test Now
+              {isCameraRequesting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Starting Camera...
+                </>
+              ) : (
+                <>
+                  <Maximize className="w-4 h-4" /> Start Test Now
+                </>
+              )}
             </button>
           </div>
         </div>
+
+        {/* CAMERA PERMISSION REQUIRED MODAL */}
+        <AnimatePresence>
+          {showCameraModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="w-full max-w-md bg-white rounded-3xl p-6 text-center space-y-4 shadow-2xl border border-slate-100"
+              >
+                <div className="w-14 h-14 rounded-full bg-blue-50 text-[#0952cc] mx-auto flex items-center justify-center">
+                  <Camera className="w-7 h-7" />
+                </div>
+                <h3 className="text-lg font-extrabold text-slate-900">
+                  Camera Access Required
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  AptiGuard requires continuous live camera access to monitor test integrity during this assessment.
+                </p>
+                {cameraError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-left flex items-start gap-2.5">
+                    <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-800 leading-relaxed font-medium">
+                      {cameraError}
+                    </p>
+                  </div>
+                )}
+                <div className="pt-2 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowCameraModal(false)}
+                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRetryCameraFromModal}
+                    disabled={isCameraRequesting}
+                    className="flex-1 py-2.5 bg-[#0952cc] hover:bg-[#0747a6] text-white text-xs font-bold rounded-xl uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+                  >
+                    {isCameraRequesting ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Connecting...</span>
+                      </>
+                    ) : (
+                      <span>Try Again</span>
+                    )}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
     );
   }
@@ -1033,46 +1163,58 @@ export const TestExecutionView: React.FC = () => {
             </div>
           </div>
 
-          {/* Right Column: Question Navigator Palette */}
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 space-y-5">
-            <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-              Question Navigator ({answeredCount}/{questions.length} Answered)
-            </h3>
+          {/* Right Column: Camera Monitor & Question Navigator Palette */}
+          <div className="space-y-6">
+            {/* Live Camera Proctoring Monitor */}
+            <CameraMonitor
+              stream={cameraStream}
+              isActive={isCameraActive}
+              error={cameraError}
+              onRetry={requestCameraAccess}
+              isRetrying={isCameraRequesting}
+            />
 
-            {/* Grid Palette */}
-            <div className="grid grid-cols-5 gap-2 max-h-[300px] overflow-y-auto pr-1">
-              {questions.map((q, idx) => (
-                <button
-                  key={q.id}
-                  onClick={() => handleNavigateQuestion(idx)}
-                  className={`h-9 rounded-lg text-xs flex items-center justify-center transition-all ${getQuestionBadgeStyle(q.id, idx)}`}
-                >
-                  {idx + 1}
-                </button>
-              ))}
-            </div>
+            {/* Question Navigator Palette */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 space-y-5">
+              <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                Question Navigator ({answeredCount}/{questions.length} Answered)
+              </h3>
 
-            {/* Legend Palette */}
-            <div className="pt-4 border-t border-slate-100 space-y-2 text-[10px] font-semibold text-slate-600">
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-emerald-500" />
-                <span>Answered</span>
+              {/* Grid Palette */}
+              <div className="grid grid-cols-5 gap-2 max-h-[300px] overflow-y-auto pr-1">
+                {questions.map((q, idx) => (
+                  <button
+                    key={q.id}
+                    onClick={() => handleNavigateQuestion(idx)}
+                    className={`h-9 rounded-lg text-xs flex items-center justify-center transition-all ${getQuestionBadgeStyle(q.id, idx)}`}
+                  >
+                    {idx + 1}
+                  </button>
+                ))}
               </div>
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-[#0952cc] ring-2 ring-[#0952cc]/30" />
-                <span>Current Question</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-amber-400" />
-                <span>Marked for Review</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-purple-600 border border-amber-300" />
-                <span>Answered & Marked</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded bg-slate-100" />
-                <span>Not Visited</span>
+
+              {/* Legend Palette */}
+              <div className="pt-4 border-t border-slate-100 space-y-2 text-[10px] font-semibold text-slate-600">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded bg-emerald-500" />
+                  <span>Answered</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded bg-[#0952cc] ring-2 ring-[#0952cc]/30" />
+                  <span>Current Question</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded bg-amber-400" />
+                  <span>Marked for Review</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded bg-purple-600 border border-amber-300" />
+                  <span>Answered & Marked</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded bg-slate-100" />
+                  <span>Not Visited</span>
+                </div>
               </div>
             </div>
           </div>
