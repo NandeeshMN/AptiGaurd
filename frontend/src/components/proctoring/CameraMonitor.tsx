@@ -2,8 +2,6 @@ import React, { useRef, useEffect, useState } from 'react';
 import {
   CheckCircle2,
   Info,
-  Maximize,
-  Minimize,
   AlertTriangle,
   RefreshCw,
   VideoOff,
@@ -40,8 +38,6 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
   isRetrying = false,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Dynamic real-time proctor cue states
   const [displayCue, setDisplayCue] = useState<ProctorCue>(PROCTOR_CUES[0]);
@@ -109,27 +105,6 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
     };
   }, [isActive, stream]);
 
-  // Fullscreen toggle for video preview
-  const handleToggleFullscreen = () => {
-    if (!containerRef.current) return;
-
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
-    }
-  };
-
-  useEffect(() => {
-    const handleFsChange = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement));
-    };
-    document.addEventListener('fullscreenchange', handleFsChange);
-    return () => document.removeEventListener('fullscreenchange', handleFsChange);
-  }, []);
-
   const CueIcon = displayCue.icon;
 
   return (
@@ -153,10 +128,7 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
       </div>
 
       {/* Video Viewport / Silhouette Placeholder */}
-      <div
-        ref={containerRef}
-        className="relative aspect-4/3 w-full rounded-xl overflow-hidden bg-slate-900 border border-slate-200/80 flex items-center justify-center select-none"
-      >
+      <div className="relative aspect-4/3 w-full rounded-xl overflow-hidden bg-slate-900 border border-slate-200/80 flex items-center justify-center select-none">
         {isActive && stream ? (
           <>
             <video
@@ -172,20 +144,6 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="font-semibold text-emerald-300">LIVE AI</span>
             </div>
-
-            {/* Expand / Maximize Control in Top-Right */}
-            <button
-              type="button"
-              onClick={handleToggleFullscreen}
-              title={isFullscreen ? 'Exit full camera preview' : 'Maximize camera preview'}
-              className="absolute top-2.5 right-2.5 p-1.5 bg-slate-900/60 hover:bg-slate-900/80 text-white rounded-lg backdrop-blur-xs transition-colors cursor-pointer z-10"
-            >
-              {isFullscreen ? (
-                <Minimize className="w-3.5 h-3.5" />
-              ) : (
-                <Maximize className="w-3.5 h-3.5" />
-              )}
-            </button>
 
             {/* Dynamic Real-Time AI Proctor Cue Pill (HUD Overlay) */}
             <div
