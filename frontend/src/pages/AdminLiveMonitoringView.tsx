@@ -5,11 +5,14 @@ import {
   query,
   where,
   onSnapshot,
-  getDocs,
+  doc,
+  updateDoc,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from '../context/AuthContext';
 import { getWebRTCConfig, getSignalingUrl } from '../config/webrtc';
+import { getAdminTestLifecycleStatus } from '../utils/testLifecycle';
 import {
   Video,
   VideoOff,
@@ -68,6 +71,7 @@ export interface StudentAttemptData {
     occlusion?: number;
   };
   startedAtMs?: number;
+  expiresAtMs?: number;
 }
 
 export interface MergedStudentFeed {
@@ -296,7 +300,9 @@ export const AdminLiveMonitoringView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTestId, setSelectedTestId] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'live' | 'violations' | 'offline'>('all');
-  const [testsList, setTestsList] = useState<Array<{ id: string; title: string }>>([]);
+  const [testsList, setTestsList] = useState<Array<{ id: string; title: string; lifecycle: string }>>([]);
+  const [testsMap, setTestsMap] = useState<Map<string, any>>(new Map());
+  const [currentTimeMs, setCurrentTimeMs] = useState<number>(Date.now());
 
   // UI / Modal States
   const [inspectedFeed, setInspectedFeed] = useState<MergedStudentFeed | null>(null);
@@ -311,30 +317,49 @@ export const AdminLiveMonitoringView: React.FC = () => {
   const [cycleIntervalSeconds] = useState<number>(20);
   const [isHoveredOverGrid, setIsHoveredOverGrid] = useState<boolean>(false);
 
+  // Periodic heartbeat timer to keep assessment lifecycles and expirations accurate in real-time
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTimeMs(Date.now());
+    }, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
   // ──────────────────────────────────────────────────────────────────────────
-  // 1. Fetch available tests for filter dropdown
+  // 1. Real-time Firestore Listener for tests (for filter dropdown & lifecycle check)
   // ──────────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const fetchTests = async () => {
-      try {
-        const snap = await getDocs(collection(db, 'tests'));
-        const list: Array<{ id: string; title: string }> = [];
+    const unsub = onSnapshot(
+      collection(db, 'tests'),
+      (snap) => {
+        const map = new Map<string, any>();
+        const list: Array<{ id: string; title: string; lifecycle: string }> = [];
+        const now = Date.now();
         snap.forEach((d) => {
           const data = d.data();
+          map.set(d.id, { id: d.id, ...data });
           if (data.status !== 'draft') {
-            list.push({ id: d.id, title: data.title || 'Untitled Assessment' });
+            const lifecycle = getAdminTestLifecycleStatus(data, now);
+            list.push({
+              id: d.id,
+              title: data.title || 'Untitled Assessment',
+              lifecycle,
+            });
           }
         });
+        setTestsMap(map);
         setTestsList(list);
-      } catch (err) {
-        console.warn('[AdminLiveMonitoring] Error loading tests for filter:', err);
+      },
+      (err) => {
+        console.warn('[AdminLiveMonitoring] Error listening to tests:', err);
       }
-    };
-    fetchTests();
+    );
+    return () => unsub();
   }, []);
 
   // ──────────────────────────────────────────────────────────────────────────
   // 2. Real-time Firestore Listener for active testAttempts (status == 'in_progress')
+  // Strictly auto-heals and excludes attempts whose test is finished or time expired
   // ──────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const q = query(collection(db, 'testAttempts'), where('status', '==', 'in_progress'));
@@ -342,8 +367,33 @@ export const AdminLiveMonitoringView: React.FC = () => {
       q,
       (snapshot) => {
         const attemptsMap = new Map<string, StudentAttemptData>();
+        const now = Date.now();
+
         snapshot.forEach((d) => {
           const data = d.data() as any;
+          const expiresAtMs = data.expiresAtMs;
+          const isExpired = expiresAtMs
+            ? expiresAtMs <= now
+            : data.startedAtMs
+            ? now - data.startedAtMs > 4 * 3600 * 1000
+            : false;
+
+          // Check parent assessment lifecycle
+          const parentTest = testsMap.get(data.testId);
+          const isTestClosed = parentTest
+            ? getAdminTestLifecycleStatus(parentTest, now) === 'closed'
+            : false;
+
+          if (isExpired || isTestClosed) {
+            // Auto-heal Firestore record so it transitions cleanly to completed
+            updateDoc(doc(db, 'testAttempts', d.id), {
+              status: 'auto_submitted',
+              submissionReason: isExpired ? 'time_expired' : 'test_ended',
+              submittedAt: serverTimestamp(),
+            }).catch(() => {});
+            return;
+          }
+
           attemptsMap.set(d.id, {
             id: d.id,
             userId: data.userId,
@@ -353,7 +403,7 @@ export const AdminLiveMonitoringView: React.FC = () => {
             userEmail: data.userEmail,
             uucmsNo: data.uucmsNo,
             testId: data.testId,
-            testTitle: data.testTitle,
+            testTitle: data.testTitle || parentTest?.title,
             status: data.status || 'in_progress',
             cameraStatus: data.cameraStatus || 'active',
             exitCount: typeof data.exitCount === 'number' ? data.exitCount : 0,
@@ -365,6 +415,7 @@ export const AdminLiveMonitoringView: React.FC = () => {
               occlusion: 0,
             },
             startedAtMs: data.startedAtMs || (data.startedAt?.seconds ? data.startedAt.seconds * 1000 : undefined),
+            expiresAtMs: data.expiresAtMs,
           });
         });
         setFirestoreAttempts(attemptsMap);
@@ -375,7 +426,8 @@ export const AdminLiveMonitoringView: React.FC = () => {
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [testsMap]);
+
 
   // ──────────────────────────────────────────────────────────────────────────
   // 3. Socket.IO Signaling Server Connection & WebRTC Receiver Handlers
@@ -639,10 +691,31 @@ export const AdminLiveMonitoringView: React.FC = () => {
   // 4. Merge Firestore Attempts + Socket Active Sessions
   // ──────────────────────────────────────────────────────────────────────────
   const mergedFeeds: MergedStudentFeed[] = useMemo(() => {
-    // Collect all unique attempt IDs from both Firestore and Socket
+    const now = currentTimeMs;
+
+    // Collect all valid active attempt IDs
     const allAttemptIds = new Set<string>();
-    firestoreAttempts.forEach((_, id) => allAttemptIds.add(id));
-    activeSessions.forEach((_, id) => allAttemptIds.add(id));
+
+    firestoreAttempts.forEach((att, id) => {
+      // If attempt is expired, skip
+      if (att.expiresAtMs && att.expiresAtMs <= now) return;
+      if (att.startedAtMs && now - att.startedAtMs > 4 * 3600 * 1000) return;
+      // If parent assessment is closed/completed, skip
+      const parentTest = testsMap.get(att.testId || '');
+      if (parentTest && getAdminTestLifecycleStatus(parentTest, now) === 'closed') return;
+      allAttemptIds.add(id);
+    });
+
+    activeSessions.forEach((session, id) => {
+      // Check parent assessment
+      const parentTest = testsMap.get(session.testId || '');
+      if (parentTest && getAdminTestLifecycleStatus(parentTest, now) === 'closed') return;
+      // If student is in firestoreAttempts and expired, skip
+      const fDoc = firestoreAttempts.get(id);
+      if (fDoc && fDoc.expiresAtMs && fDoc.expiresAtMs <= now) return;
+      if (fDoc && fDoc.status !== 'in_progress') return;
+      allAttemptIds.add(id);
+    });
 
     const feeds: MergedStudentFeed[] = [];
 
@@ -652,6 +725,16 @@ export const AdminLiveMonitoringView: React.FC = () => {
 
       // If neither has valid active test data, skip
       if (!fDoc && !sSession) return;
+
+      const testId = fDoc?.testId || sSession?.testId || '';
+      const parentTest = testsMap.get(testId);
+
+      // If parent test is completed/closed, student should NOT be shown in live monitoring
+      if (parentTest && getAdminTestLifecycleStatus(parentTest, now) === 'closed') return;
+
+      // If attempt is expired or completed, skip
+      if (fDoc?.expiresAtMs && fDoc.expiresAtMs <= now) return;
+      if (fDoc && fDoc.status !== 'in_progress') return;
 
       const studentName =
         fDoc?.candidateName ||
@@ -666,9 +749,8 @@ export const AdminLiveMonitoringView: React.FC = () => {
         (fDoc?.userEmail ? fDoc.userEmail.split('@')[0] : '—');
 
       const testTitle =
-        fDoc?.testTitle || sSession?.testTitle || 'Aptitude Assessment';
+        fDoc?.testTitle || sSession?.testTitle || parentTest?.title || 'Aptitude Assessment';
 
-      const testId = fDoc?.testId || sSession?.testId || '';
       const startedAtMs = fDoc?.startedAtMs || sSession?.joinedAt || Date.now();
       const exitCount = fDoc?.exitCount ?? 0;
       const cameraStatus = fDoc?.cameraStatus || sSession?.cameraStatus || 'active';
@@ -698,7 +780,14 @@ export const AdminLiveMonitoringView: React.FC = () => {
     });
 
     return feeds;
-  }, [firestoreAttempts, activeSessions, remoteStreams, peerStates]);
+  }, [firestoreAttempts, activeSessions, remoteStreams, peerStates, testsMap, currentTimeMs]);
+
+  // Auto-close candidate inspection modal if test completes or candidate leaves
+  useEffect(() => {
+    if (inspectedFeed && !mergedFeeds.some((f) => f.attemptId === inspectedFeed.attemptId)) {
+      setInspectedFeed(null);
+    }
+  }, [mergedFeeds, inspectedFeed]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // 5. Filter & Search Feeds
@@ -706,8 +795,15 @@ export const AdminLiveMonitoringView: React.FC = () => {
   const filteredFeeds = useMemo(() => {
     return mergedFeeds.filter((feed) => {
       // Test ID Filter
-      if (selectedTestId !== 'all' && feed.testId !== selectedTestId) {
-        return false;
+      if (selectedTestId !== 'all') {
+        if (feed.testId !== selectedTestId) {
+          return false;
+        }
+        // If selected test is closed, do not show any feeds
+        const selTest = testsMap.get(selectedTestId);
+        if (selTest && getAdminTestLifecycleStatus(selTest, currentTimeMs) === 'closed') {
+          return false;
+        }
       }
 
       // Search Query Filter (name or uucms)
@@ -731,7 +827,7 @@ export const AdminLiveMonitoringView: React.FC = () => {
 
       return true;
     });
-  }, [mergedFeeds, selectedTestId, searchQuery, statusFilter]);
+  }, [mergedFeeds, selectedTestId, searchQuery, statusFilter, testsMap, currentTimeMs]);
 
   // ─── 5b. Smart Sorting (Priority: High Violations First) ───────────────────
   const sortedFeeds = useMemo(() => {
@@ -951,7 +1047,7 @@ export const AdminLiveMonitoringView: React.FC = () => {
               <option value="all">All Assessments</option>
               {testsList.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.title}
+                  {t.title} {t.lifecycle === 'closed' ? '(Completed)' : t.lifecycle === 'in_progress' ? '(Live)' : '(Scheduled)'}
                 </option>
               ))}
             </select>

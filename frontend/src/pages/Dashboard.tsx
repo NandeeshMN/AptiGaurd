@@ -36,45 +36,14 @@ import {
   Video
 } from 'lucide-react';
 
-export function getAdminTestLifecycleStatus(t: any, nowMs: number = Date.now()): 'draft' | 'scheduled' | 'in_progress' | 'closed' {
-  if (!t) return 'closed';
-  if (t.status === 'draft') return 'draft';
-  if (t.status === 'completed' || t.status === 'closed' || t.status === 'expired') {
-    return 'closed';
-  }
+import {
+  getAdminTestLifecycleStatus,
+  isTestClosedOrCompleted,
+  isAttemptExpired,
+} from '../utils/testLifecycle';
 
-  const availabilityType = t.availabilityType || 'later';
+export { getAdminTestLifecycleStatus, isTestClosedOrCompleted, isAttemptExpired };
 
-  if (availabilityType === 'immediate') {
-    const createdMs = t.createdAt?.seconds ? t.createdAt.seconds * 1000 : (t.createdAtMs || nowMs);
-    const durationMs = (t.duration || 30) * 60 * 1000;
-    const endMs = createdMs + durationMs;
-    if (nowMs < createdMs) return 'scheduled';
-    if (nowMs >= endMs) return 'closed';
-    return 'in_progress';
-  }
-
-  const sDate = t.startDate || '';
-  const sTime = t.startTime || '00:00';
-  const eDate = t.endDate || sDate;
-  const eTime = t.endTime || '23:59';
-
-  const startMs = new Date(`${sDate}T${sTime}:00`).getTime();
-  const endMs = new Date(`${eDate}T${eTime}:00`).getTime();
-
-  if (isNaN(startMs) || isNaN(endMs)) {
-    return 'closed';
-  }
-
-  if (nowMs < startMs) {
-    return 'scheduled';
-  }
-  if (nowMs >= endMs) {
-    return 'closed';
-  }
-
-  return 'in_progress';
-}
 
 const AdminTestOverviewCard: React.FC<{ test: any, onManage: (id: string) => void, onView: (id: string) => void, onMonitor: (id: string) => void }> = ({ test, onManage, onView, onMonitor }) => {
   const [assignedUids, setAssignedUids] = React.useState<Set<string>>(new Set());
@@ -243,6 +212,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   const [nowTimeMs, setNowTimeMs] = useState<number>(Date.now());
   const [liveAttemptsCount, setLiveAttemptsCount] = useState<number>(0);
 
+  // Periodic timer to keep assessment lifecycles and live badge updated in real-time
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNowTimeMs(Date.now());
+    }, 4000);
+    return () => clearInterval(timer);
+  }, []);
+
   const handleExecuteClearData = async () => {
     if (isClearingData || !currentUser) return;
     setIsClearingData(true);
@@ -332,21 +309,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     }
   }, [defaultTab]);
 
-  // Real-time listener for live in-progress test attempts (for the LIVE indicator badge)
-  useEffect(() => {
-    if (!isAdmin) return;
-    const qLive = query(collection(db, 'testAttempts'), where('status', '==', 'in_progress'));
-    const unsub = onSnapshot(
-      qLive,
-      (snapshot) => {
-        setLiveAttemptsCount(snapshot.size);
-      },
-      (err) => {
-        console.warn('[Dashboard] Live attempts listener:', err);
-      }
-    );
-    return () => unsub();
-  }, [isAdmin]);
 
   // Dynamic Browser Tab Title Management based on Active Tab & Role
   useEffect(() => {
@@ -723,6 +685,53 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
 
     return () => unsub();
   }, [isAdmin, pendingDeleteIds]);
+
+  // Real-time listener for live in-progress test attempts (for the LIVE indicator badge)
+  // Strictly excludes attempts whose test duration has expired or whose parent assessment is closed/completed
+  useEffect(() => {
+    if (!isAdmin) return;
+    const qLive = query(collection(db, 'testAttempts'), where('status', '==', 'in_progress'));
+    const unsub = onSnapshot(
+      qLive,
+      (snapshot) => {
+        const now = nowTimeMs;
+        let validLiveCount = 0;
+
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          const expiresAtMs = data.expiresAtMs;
+          const isExpired = expiresAtMs
+            ? expiresAtMs <= now
+            : data.startedAtMs
+            ? now - data.startedAtMs > 4 * 3600 * 1000
+            : false;
+
+          // Find parent assessment
+          const parentTest = allTests.find((t) => t.id === data.testId);
+          const isTestClosed = parentTest
+            ? getAdminTestLifecycleStatus(parentTest, now) === 'closed'
+            : false;
+
+          if (isExpired || isTestClosed) {
+            // Auto-heal stale record in Firestore so it moves cleanly to completed results
+            updateDoc(doc(db, 'testAttempts', docSnap.id), {
+              status: 'auto_submitted',
+              submissionReason: isExpired ? 'time_expired' : 'test_ended',
+              submittedAt: serverTimestamp(),
+            }).catch(() => {});
+          } else {
+            validLiveCount++;
+          }
+        });
+
+        setLiveAttemptsCount(validLiveCount);
+      },
+      (err) => {
+        console.warn('[Dashboard] Live attempts listener:', err);
+      }
+    );
+    return () => unsub();
+  }, [isAdmin, allTests, nowTimeMs]);
 
 
 
