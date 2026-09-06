@@ -43,6 +43,7 @@ interface StudentRow {
     fullscreen?: number;
     tab?: number;
     blur?: number;
+    occlusion?: number;
   } | null;
 }
 
@@ -451,6 +452,11 @@ export const AdminMonitorView: React.FC = () => {
                                 {(row.violationBreakdown.blur ?? 0) > 0 && (
                                   <span className="inline-flex items-center text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded">
                                     🔲 Focus: {row.violationBreakdown.blur}
+                                  </span>
+                                )}
+                                {(row.violationBreakdown.occlusion ?? 0) > 0 && (
+                                  <span className="inline-flex items-center text-[10px] font-medium bg-rose-50 text-rose-700 border border-rose-200 px-1.5 py-0.5 rounded">
+                                    📱 Occlusion: {row.violationBreakdown.occlusion}
                                   </span>
                                 )}
                               </div>

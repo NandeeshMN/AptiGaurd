@@ -43,6 +43,7 @@ import {
 import { checkIsMobileDevice } from '../utils/deviceDetection';
 import { useCamera } from '../hooks/useCamera';
 import { CameraMonitor } from '../components/proctoring/CameraMonitor';
+import { ForensicWatermark } from '../components/proctoring/ForensicWatermark';
 /**
  * Calculates candidate's authoritative effective test expiration timestamp in milliseconds.
  * Caps personal candidate duration by absolute scheduled test end time (for late joiners).
@@ -121,16 +122,18 @@ export const TestExecutionView: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [resultData, setResultData] = useState<any>(null);
   const [candidateName, setCandidateName] = useState<string>('');
+  const [candidateUucms, setCandidateUucms] = useState<string>('');
   const [isMobileBlocked, setIsMobileBlocked] = useState<boolean>(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const hasSubmittedRef = useRef<boolean>(false);
   const [showCameraModal, setShowCameraModal] = useState<boolean>(false);
-  const recordViolationRef = useRef<((type: 'fullscreen_exit' | 'tab_switch' | 'window_blur' | 'camera_interrupted') => void) | null>(null);
+  const recordViolationRef = useRef<((type: 'fullscreen_exit' | 'tab_switch' | 'window_blur' | 'camera_interrupted' | 'face_occlusion') => void) | null>(null);
   const violationBreakdownRef = useRef<Record<string, number>>({
     camera: 0,
     fullscreen: 0,
     tab: 0,
     blur: 0,
+    occlusion: 0,
   });
 
   // Camera Management Hook for Live Proctoring
@@ -193,14 +196,17 @@ export const TestExecutionView: React.FC = () => {
         // Fetch canonical candidate profile from Firestore users collection
         const userDocSnap = await getDoc(doc(db, 'users', currentUser.uid));
         let resolvedName = '';
+        let resolvedUucms = '';
         if (userDocSnap.exists()) {
           const uData = userDocSnap.data();
           resolvedName = uData.name || uData.fullName || uData.displayName || '';
+          resolvedUucms = uData.uucmsNo || uData.uucms || '';
         }
         if (!resolvedName || resolvedName.includes('@')) {
           resolvedName = currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : 'Candidate Student');
         }
         setCandidateName(resolvedName);
+        setCandidateUucms(resolvedUucms);
 
         // Fetch Test Document
         const testRef = doc(db, 'tests', testId);
@@ -372,7 +378,7 @@ export const TestExecutionView: React.FC = () => {
       const newAttemptRef = doc(collection(db, 'testAttempts'));
       const newAttemptId = newAttemptRef.id;
 
-      violationBreakdownRef.current = { camera: 0, fullscreen: 0, tab: 0, blur: 0 };
+      violationBreakdownRef.current = { camera: 0, fullscreen: 0, tab: 0, blur: 0, occlusion: 0 };
 
       const attemptPayload = {
         userId: currentUser.uid,
@@ -394,6 +400,7 @@ export const TestExecutionView: React.FC = () => {
           fullscreen: 0,
           tab: 0,
           blur: 0,
+          occlusion: 0,
         },
         currentQuestion: 0,
         exitCount: 0,
@@ -559,7 +566,7 @@ export const TestExecutionView: React.FC = () => {
   // 5. PROCTORING & VIOLATION DETECTION (FULLSCREEN / VISIBILITY / CAMERA)
   // -------------------------------------------------------------
   const recordViolation = useCallback(
-    async (type: 'fullscreen_exit' | 'tab_switch' | 'window_blur' | 'camera_interrupted') => {
+    async (type: 'fullscreen_exit' | 'tab_switch' | 'window_blur' | 'camera_interrupted' | 'face_occlusion') => {
       if (viewMode !== 'active' || !attemptId || isSubmitting || hasSubmittedRef.current) return;
 
       const now = Date.now();
@@ -574,6 +581,7 @@ export const TestExecutionView: React.FC = () => {
       if (type === 'camera_interrupted') bKey = 'camera';
       else if (type === 'tab_switch') bKey = 'tab';
       else if (type === 'window_blur') bKey = 'blur';
+      else if (type === 'face_occlusion') bKey = 'occlusion';
 
       const nextCount = (violationBreakdownRef.current[bKey] || 0) + 1;
       violationBreakdownRef.current[bKey] = nextCount;
@@ -600,13 +608,16 @@ export const TestExecutionView: React.FC = () => {
       }
 
       const isCamera = type === 'camera_interrupted';
+      const isOcclusion = type === 'face_occlusion';
 
       // Handle 3-exit rule warnings & auto-submission
       if (newExitCount === 1) {
         setWarningModal({
           show: true,
           level: 1,
-          message: isCamera
+          message: isOcclusion
+            ? '⚠️ Face / Chin Occlusion Detected\n\nThis is Warning 1 of 3.\nPlease keep your mobile phone, hands, and objects away from the camera view.'
+            : isCamera
             ? '⚠️ Camera Access Interrupted\n\nThis is Warning 1 of 3.\nPlease restore your camera feed immediately to continue the test.'
             : '⚠️ Fullscreen Exit / Tab Switch Detected\n\nThis is Warning 1 of 3.\nPlease return to fullscreen mode to continue the test.',
         });
@@ -614,7 +625,9 @@ export const TestExecutionView: React.FC = () => {
         setWarningModal({
           show: true,
           level: 2,
-          message: isCamera
+          message: isOcclusion
+            ? '⚠️ Second Face Occlusion Violation Detected\n\nThis is Warning 2 of 3.\nOne more proctoring violation will automatically submit your test!'
+            : isCamera
             ? '⚠️ Second Camera Violation Detected\n\nThis is Warning 2 of 3.\nOne more proctoring violation will automatically submit your test!'
             : '⚠️ Second Violation Detected\n\nThis is Warning 2 of 3.\nOne more violation will automatically submit your test!',
         });
@@ -1067,7 +1080,13 @@ export const TestExecutionView: React.FC = () => {
     const unansweredCount = questions.length - answeredCount;
 
     return (
-      <div className="min-h-screen bg-[#f8fafc] flex flex-col font-sans text-slate-900 select-none">
+      <div className="min-h-screen bg-[#f8fafc] flex flex-col font-sans text-slate-900 select-none relative">
+        {/* Dynamic Forensic Watermark Layer */}
+        <ForensicWatermark
+          candidateName={candidateName}
+          uucmsNo={candidateUucms}
+          testTitle={testData?.title}
+        />
         
         {/* Top Assessment Header */}
         <header className="bg-white border-b border-slate-200/80 px-4 sm:px-8 py-3 flex items-center justify-between sticky top-0 z-30 shadow-xs">
@@ -1221,6 +1240,9 @@ export const TestExecutionView: React.FC = () => {
               error={cameraError}
               onRetry={requestCameraAccess}
               isRetrying={isCameraRequesting}
+              onOcclusionViolation={() => {
+                recordViolationRef.current?.('face_occlusion');
+              }}
             />
 
             {/* Question Navigator Palette */}

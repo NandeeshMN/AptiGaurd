@@ -9,6 +9,7 @@ import {
   Target,
   UserCheck,
 } from 'lucide-react';
+import { useOcclusionDetection } from '../../hooks/useOcclusionDetection';
 
 export interface CameraMonitorProps {
   stream: MediaStream | null;
@@ -16,6 +17,7 @@ export interface CameraMonitorProps {
   error?: string | null;
   onRetry?: () => void;
   isRetrying?: boolean;
+  onOcclusionViolation?: () => void;
 }
 
 interface ProctorCue {
@@ -36,8 +38,18 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
   error,
   onRetry,
   isRetrying = false,
+  onOcclusionViolation,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Real-time Face & Chin Occlusion Detection (phone/hand in front of camera)
+  const { isOccluded, occlusionMessage } = useOcclusionDetection({
+    videoRef,
+    isActive: isActive && Boolean(stream),
+    onViolation: () => {
+      onOcclusionViolation?.();
+    },
+  });
 
   // Dynamic real-time proctor cue states
   const [displayCue, setDisplayCue] = useState<ProctorCue>(PROCTOR_CUES[0]);
@@ -144,6 +156,16 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="font-semibold text-emerald-300">LIVE AI</span>
             </div>
+
+            {/* Real-Time Chin / Face Occlusion Warning Banner */}
+            {isOccluded && (
+              <div className="absolute top-2 left-2 right-2 z-30 animate-pulse">
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-600/95 backdrop-blur-md text-white text-[10px] font-bold shadow-lg border border-red-300/40">
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 text-white" />
+                  <span className="truncate">{occlusionMessage || 'Chin / face blocked. Keep hands & phone away.'}</span>
+                </div>
+              </div>
+            )}
 
             {/* Dynamic Real-Time AI Proctor Cue Pill (HUD Overlay) */}
             <div
