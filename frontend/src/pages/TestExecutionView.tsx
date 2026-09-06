@@ -44,6 +44,7 @@ import { checkIsMobileDevice } from '../utils/deviceDetection';
 import { useCamera } from '../hooks/useCamera';
 import { CameraMonitor } from '../components/proctoring/CameraMonitor';
 import { ForensicWatermark } from '../components/proctoring/ForensicWatermark';
+import { useWebRTCPublisher } from '../hooks/useWebRTCPublisher';
 /**
  * Calculates candidate's authoritative effective test expiration timestamp in milliseconds.
  * Caps personal candidate duration by absolute scheduled test end time (for late joiners).
@@ -162,6 +163,17 @@ export const TestExecutionView: React.FC = () => {
     }
     return s;
   }, [rawRequestCameraAccess, attemptId, viewMode]);
+
+  // WebRTC Peer-to-Peer Live Camera Streaming to Admin Dashboard
+  const { connectionStatus: rtcStatus } = useWebRTCPublisher({
+    stream: cameraStream,
+    isActive: isCameraActive && viewMode === 'active',
+    attemptId,
+    testId: testId || null,
+    studentName: candidateName || currentUser?.displayName || 'Candidate',
+    uucmsNo: candidateUucms,
+    testTitle: testData?.title || 'Assessment',
+  });
 
   // Download Purpose-Built PNG Result Card using Canvas 2D engine
   const handleDownloadResultCardPNG = () => {
@@ -1243,6 +1255,7 @@ export const TestExecutionView: React.FC = () => {
               onOcclusionViolation={() => {
                 recordViolationRef.current?.('face_occlusion');
               }}
+              rtcStatus={rtcStatus}
             />
 
             {/* Question Navigator Palette */}

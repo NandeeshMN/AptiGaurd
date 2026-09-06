@@ -8,6 +8,7 @@ import { CompletedTestsView } from './CompletedTestsView';
 import { ResultsView } from './ResultsView';
 import { AdminResultsView } from './AdminResultsView';
 import { AdminStudentsView } from './AdminStudentsView';
+import { AdminLiveMonitoringView } from './AdminLiveMonitoringView';
 import { ProfileView } from './ProfileView';
 import { CreateTestView } from './CreateTestView';
 // import { Footer } from '../components/Footer';
@@ -31,7 +32,8 @@ import {
   CheckCheck,
   AlertTriangle,
   Trash2,
-  FileEdit
+  FileEdit,
+  Video
 } from 'lucide-react';
 
 export function getAdminTestLifecycleStatus(t: any, nowMs: number = Date.now()): 'draft' | 'scheduled' | 'in_progress' | 'closed' {
@@ -239,6 +241,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   const [activeTab, setActiveTab] = useState<string>(() => defaultTab || 'dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [nowTimeMs, setNowTimeMs] = useState<number>(Date.now());
+  const [liveAttemptsCount, setLiveAttemptsCount] = useState<number>(0);
 
   const handleExecuteClearData = async () => {
     if (isClearingData || !currentUser) return;
@@ -329,6 +332,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
     }
   }, [defaultTab]);
 
+  // Real-time listener for live in-progress test attempts (for the LIVE indicator badge)
+  useEffect(() => {
+    if (!isAdmin) return;
+    const qLive = query(collection(db, 'testAttempts'), where('status', '==', 'in_progress'));
+    const unsub = onSnapshot(
+      qLive,
+      (snapshot) => {
+        setLiveAttemptsCount(snapshot.size);
+      },
+      (err) => {
+        console.warn('[Dashboard] Live attempts listener:', err);
+      }
+    );
+    return () => unsub();
+  }, [isAdmin]);
+
   // Dynamic Browser Tab Title Management based on Active Tab & Role
   useEffect(() => {
     if (isAdmin) {
@@ -341,6 +360,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
           break;
         case 'tests':
           document.title = 'AptiGuard | Tests';
+          break;
+        case 'monitoring':
+          document.title = 'AptiGuard | Live Monitoring';
           break;
         case 'results':
           document.title = 'AptiGuard | Results';
@@ -917,6 +939,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                 <span>Drafts</span>
               </button>
               <button
+                onClick={() => setActiveTab('monitoring')}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold transition-all duration-200 ${activeTab === 'monitoring'
+                    ? 'bg-blue-50 text-[#0952cc]'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+              >
+                <div className="flex items-center space-x-3">
+                  <Video className="w-4.5 h-4.5" />
+                  <span>Live Monitoring</span>
+                </div>
+                {liveAttemptsCount > 0 && (
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-100 text-emerald-700 animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    LIVE
+                  </span>
+                )}
+              </button>
+              <button
                 onClick={() => setActiveTab('students')}
                 className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all duration-200 ${activeTab === 'students'
                     ? 'bg-blue-50 text-[#0952cc]'
@@ -1017,6 +1057,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                 >
                   <FileEdit className="w-4.5 h-4.5" />
                   <span>Drafts</span>
+                </button>
+                <button
+                  onClick={() => { setActiveTab('monitoring'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold ${activeTab === 'monitoring' ? 'bg-blue-50 text-[#0952cc]' : 'text-slate-600'
+                    }`}
+                >
+                  <div className="flex items-center space-x-3">
+                    <Video className="w-4.5 h-4.5" />
+                    <span>Live Monitoring</span>
+                  </div>
+                  {liveAttemptsCount > 0 && (
+                    <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-100 text-emerald-700 animate-pulse">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      LIVE
+                    </span>
+                  )}
                 </button>
                 <button
                   onClick={() => { setActiveTab('students'); setIsMobileMenuOpen(false); }}
@@ -1419,6 +1475,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
               </div>
             ) : activeTab === 'results' ? (
               <AdminResultsView />
+            ) : activeTab === 'monitoring' ? (
+              <AdminLiveMonitoringView />
             ) : activeTab === 'students' ? (
               <AdminStudentsView />
             ) : activeTab === 'profile' ? (

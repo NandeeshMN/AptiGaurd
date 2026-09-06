@@ -18,6 +18,7 @@ export interface CameraMonitorProps {
   onRetry?: () => void;
   isRetrying?: boolean;
   onOcclusionViolation?: () => void;
+  rtcStatus?: 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 }
 
 interface ProctorCue {
@@ -39,6 +40,7 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
   onRetry,
   isRetrying = false,
   onOcclusionViolation,
+  rtcStatus = 'idle',
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -127,14 +129,21 @@ export const CameraMonitor: React.FC<CameraMonitorProps> = ({
           CAMERA
         </h3>
         {isActive ? (
-          <div className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/60">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Active</span>
-          </div>
+          rtcStatus === 'reconnecting' ? (
+            <div className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-600 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200/60">
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+              <span>Reconnecting...</span>
+            </div>
+          ) : (
+            <div className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/60">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Live Monitoring Active</span>
+            </div>
+          )
         ) : (
           <div className="inline-flex items-center gap-1.5 text-xs font-bold text-red-600 bg-red-50 px-2.5 py-0.5 rounded-full border border-red-200/60">
             <span className="w-2 h-2 rounded-full bg-red-500" />
-            <span>Inactive</span>
+            <span>Camera Inactive</span>
           </div>
         )}
       </div>
