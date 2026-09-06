@@ -25,6 +25,12 @@ import {
   Shield,
   AlertOctagon,
   Eye,
+  ChevronLeft,
+  ChevronRight,
+  ArrowUpDown,
+  SlidersHorizontal,
+  Play,
+  Pause,
 } from 'lucide-react';
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
@@ -296,6 +302,14 @@ export const AdminLiveMonitoringView: React.FC = () => {
   const [inspectedFeed, setInspectedFeed] = useState<MergedStudentFeed | null>(null);
   const [isSignalingConnected, setIsSignalingConnected] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Pagination & Smart Sorting States (Engineered for 70+ Students)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [itemsPerPage, setItemsPerPage] = useState<number>(12);
+  const [sortMode, setSortMode] = useState<'priority' | 'recent' | 'name'>('priority');
+  const [isAutoCycle, setIsAutoCycle] = useState<boolean>(false);
+  const [cycleIntervalSeconds] = useState<number>(20);
+  const [isHoveredOverGrid, setIsHoveredOverGrid] = useState<boolean>(false);
 
   // ──────────────────────────────────────────────────────────────────────────
   // 1. Fetch available tests for filter dropdown
@@ -719,6 +733,70 @@ export const AdminLiveMonitoringView: React.FC = () => {
     });
   }, [mergedFeeds, selectedTestId, searchQuery, statusFilter]);
 
+  // ─── 5b. Smart Sorting (Priority: High Violations First) ───────────────────
+  const sortedFeeds = useMemo(() => {
+    return [...filteredFeeds].sort((a, b) => {
+      if (sortMode === 'priority') {
+        // 1. Highest violations count first (critical risk bubbles to Page 1)
+        if (b.exitCount !== a.exitCount) {
+          return b.exitCount - a.exitCount;
+        }
+        // 2. Active video feeds before offline
+        const aLive = a.peerState === 'connected' && Boolean(a.stream) ? 1 : 0;
+        const bLive = b.peerState === 'connected' && Boolean(b.stream) ? 1 : 0;
+        if (bLive !== aLive) {
+          return bLive - aLive;
+        }
+        // 3. Fallback: started time (most recent first)
+        return b.startedAtMs - a.startedAtMs;
+      }
+
+      if (sortMode === 'recent') {
+        return b.startedAtMs - a.startedAtMs;
+      }
+
+      if (sortMode === 'name') {
+        return a.studentName.localeCompare(b.studentName);
+      }
+
+      return 0;
+    });
+  }, [filteredFeeds, sortMode]);
+
+  // ─── 5c. Pagination Calculations ──────────────────────────────────────────
+  const effectivePerPage = itemsPerPage === 0 ? Math.max(1, sortedFeeds.length) : itemsPerPage;
+  const totalPages = Math.max(1, Math.ceil(sortedFeeds.length / effectivePerPage));
+
+  // Reset page to 1 when filters or search change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedTestId, statusFilter, sortMode, itemsPerPage]);
+
+  // Ensure currentPage is valid
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
+  // Sliced feeds for the current page only (saves browser video decoders!)
+  const pagedFeeds = useMemo(() => {
+    if (itemsPerPage === 0) return sortedFeeds;
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return sortedFeeds.slice(startIndex, startIndex + itemsPerPage);
+  }, [sortedFeeds, currentPage, itemsPerPage]);
+
+  // ─── 5d. Auto-Cycle Timer (Cycles through pages hands-free) ───────────────
+  useEffect(() => {
+    if (!isAutoCycle || totalPages <= 1 || isHoveredOverGrid || Boolean(inspectedFeed)) return;
+
+    const timer = setInterval(() => {
+      setCurrentPage((prev) => (prev >= totalPages ? 1 : prev + 1));
+    }, cycleIntervalSeconds * 1000);
+
+    return () => clearInterval(timer);
+  }, [isAutoCycle, totalPages, isHoveredOverGrid, inspectedFeed, cycleIntervalSeconds]);
+
   // ──────────────────────────────────────────────────────────────────────────
   // 6. Statistics Calculations
   // ──────────────────────────────────────────────────────────────────────────
@@ -859,7 +937,7 @@ export const AdminLiveMonitoringView: React.FC = () => {
           />
         </div>
 
-        {/* Filter Controls */}
+        {/* Filter & View Controls */}
         <div className="w-full md:w-auto flex flex-wrap items-center gap-2.5">
           {/* Test Selector Dropdown */}
           <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
@@ -878,6 +956,62 @@ export const AdminLiveMonitoringView: React.FC = () => {
               ))}
             </select>
           </div>
+
+          {/* Smart Sorting Dropdown */}
+          <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
+            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-slate-500 font-semibold text-[11px]">Sort:</span>
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as any)}
+              className="bg-transparent text-slate-800 font-bold focus:outline-none cursor-pointer text-xs"
+            >
+              <option value="priority">Priority (Violations First)</option>
+              <option value="recent">Most Recent</option>
+              <option value="name">Name (A-Z)</option>
+            </select>
+          </div>
+
+          {/* Items Per Page Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
+            <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-slate-500 font-semibold text-[11px]">Show:</span>
+            <select
+              value={itemsPerPage}
+              onChange={(e) => setItemsPerPage(Number(e.target.value))}
+              className="bg-transparent text-slate-800 font-bold focus:outline-none cursor-pointer text-xs"
+            >
+              <option value={8}>8 / page</option>
+              <option value={12}>12 / page (Recommended)</option>
+              <option value={16}>16 / page</option>
+              <option value={24}>24 / page</option>
+              <option value={0}>All ({sortedFeeds.length})</option>
+            </select>
+          </div>
+
+          {/* Auto-Cycle Pages Button */}
+          <button
+            onClick={() => setIsAutoCycle(!isAutoCycle)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+              isAutoCycle
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+            title="Automatically cycle through pages of student video feeds every 20 seconds"
+          >
+            {isAutoCycle ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <Pause className="w-3 h-3 text-emerald-600" />
+                <span>Auto-Cycle ({cycleIntervalSeconds}s)</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-3 h-3 text-slate-400" />
+                <span>Auto-Cycle Pages</span>
+              </>
+            )}
+          </button>
 
           {/* Status Tabs */}
           <div className="inline-flex rounded-xl bg-slate-100 p-1 text-xs">
@@ -925,16 +1059,100 @@ export const AdminLiveMonitoringView: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Multi-Student Responsive Video Grid ── */}
-      {filteredFeeds.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-          {filteredFeeds.map((feed) => (
-            <StudentLiveFeedCard
-              key={feed.attemptId}
-              feed={feed}
-              onInspect={(f) => setInspectedFeed(f)}
-            />
-          ))}
+      {/* ── Multi-Student Responsive Video Grid (Paged to Protect Browser Performance) ── */}
+      {pagedFeeds.length > 0 ? (
+        <div className="space-y-4">
+          <div
+            onMouseEnter={() => setIsHoveredOverGrid(true)}
+            onMouseLeave={() => setIsHoveredOverGrid(false)}
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
+          >
+            {pagedFeeds.map((feed) => (
+              <StudentLiveFeedCard
+                key={feed.attemptId}
+                feed={feed}
+                onInspect={(f) => setInspectedFeed(f)}
+              />
+            ))}
+          </div>
+
+          {/* ── Pagination Footer Bar ── */}
+          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+              <span>
+                Showing{' '}
+                <strong className="text-slate-900 font-bold">
+                  {Math.min(sortedFeeds.length, (currentPage - 1) * (itemsPerPage || sortedFeeds.length) + 1)}
+                </strong>{' '}
+                to{' '}
+                <strong className="text-slate-900 font-bold">
+                  {Math.min(sortedFeeds.length, currentPage * (itemsPerPage || sortedFeeds.length))}
+                </strong>{' '}
+                of <strong className="text-slate-900 font-bold">{sortedFeeds.length}</strong> candidates
+              </span>
+              {isAutoCycle && isHoveredOverGrid && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-semibold border border-amber-200/60">
+                  Auto-cycle paused while inspecting
+                </span>
+              )}
+            </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 transition-colors"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Prev</span>
+                </button>
+
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
+                    if (
+                      totalPages > 7 &&
+                      pageNum !== 1 &&
+                      pageNum !== totalPages &&
+                      Math.abs(pageNum - currentPage) > 1
+                    ) {
+                      if (pageNum === 2 || pageNum === totalPages - 1) {
+                        return (
+                          <span key={pageNum} className="px-1 text-slate-400 text-xs">
+                            ...
+                          </span>
+                        );
+                      }
+                      return null;
+                    }
+
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`w-8 h-8 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          currentPage === pageNum
+                            ? 'bg-[#0952cc] text-white shadow-xs'
+                            : 'text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1 transition-colors"
+                >
+                  <span className="hidden sm:inline">Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         /* Empty State */

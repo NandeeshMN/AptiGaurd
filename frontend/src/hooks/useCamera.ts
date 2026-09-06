@@ -144,6 +144,7 @@ export const useCamera = (options?: UseCameraOptions): UseCameraReturn => {
         video: {
           width: { ideal: 640 },
           height: { ideal: 480 },
+          frameRate: { ideal: 15, max: 20 },
           facingMode: 'user',
         },
         audio: false,
