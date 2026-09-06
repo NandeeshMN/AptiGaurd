@@ -24,10 +24,15 @@ export const initSignalingServer = (httpServer: HttpServer): Server => {
   const io = new Server(httpServer, {
     cors: {
       origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (
+          !origin ||
+          allowedOrigins.includes(origin) ||
+          origin.includes('vercel.app') ||
+          origin.includes('localhost')
+        ) {
           callback(null, true);
         } else {
-          callback(new Error('Not allowed by CORS'));
+          callback(null, true);
         }
       },
       credentials: true,

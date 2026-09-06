@@ -1,7 +1,18 @@
-﻿export const getWebRTCConfig = (): RTCConfiguration => {
-  const stunUrl = import.meta.env.VITE_STUN_SERVER_URL || 'stun:stun.l.google.com:19302';
+import { API_BASE_URL } from './api';
+
+export const getWebRTCConfig = (): RTCConfiguration => {
+  const defaultStunServers = [
+    'stun:stun.l.google.com:19302',
+    'stun:stun1.l.google.com:19302',
+    'stun:stun2.l.google.com:19302',
+    'stun:stun3.l.google.com:19302',
+    'stun:stun4.l.google.com:19302',
+  ];
+  const customStun = import.meta.env.VITE_STUN_SERVER_URL;
+  const urls = customStun ? [customStun, ...defaultStunServers] : defaultStunServers;
+
   const iceServers: RTCIceServer[] = [
-    { urls: stunUrl },
+    { urls },
   ];
 
   if (import.meta.env.VITE_TURN_SERVER_URL) {
@@ -19,9 +30,15 @@
 };
 
 export const getSignalingUrl = (): string => {
-  return (
-    import.meta.env.VITE_SIGNALING_URL ||
-    (import.meta.env.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL.replace(/\/api\/?$/, '') : '') ||
-    'http://localhost:5000'
-  );
+  if (import.meta.env.VITE_SIGNALING_URL) {
+    return import.meta.env.VITE_SIGNALING_URL;
+  }
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL.replace(/\/api\/?$/, '');
+  }
+  if (API_BASE_URL) {
+    return API_BASE_URL.replace(/\/api\/?$/, '');
+  }
+  return 'http://localhost:5000';
 };
+

@@ -105,7 +105,7 @@ const StudentLiveFeedCard: React.FC<StudentLiveFeedCardProps> = ({ feed, onInspe
     const videoEl = videoRef.current;
     if (!videoEl) return;
 
-    if (feed.stream && feed.peerState === 'connected') {
+    if (feed.stream) {
       videoEl.srcObject = feed.stream;
       videoEl.play().catch((err) => {
         console.warn('[AdminLiveFeed] Video autoplay prevented:', err);
@@ -119,7 +119,7 @@ const StudentLiveFeedCard: React.FC<StudentLiveFeedCardProps> = ({ feed, onInspe
         videoEl.srcObject = null;
       }
     };
-  }, [feed.stream, feed.peerState]);
+  }, [feed.stream]);
 
   const hasHighViolations = feed.exitCount >= 3;
   const hasMediumViolations = feed.exitCount === 2;
@@ -161,12 +161,12 @@ const StudentLiveFeedCard: React.FC<StudentLiveFeedCardProps> = ({ feed, onInspe
 
         {/* Live Camera Status Badge */}
         <div className="flex-shrink-0">
-          {feed.peerState === 'connected' && feed.stream ? (
+          {feed.stream ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               LIVE
             </span>
-          ) : feed.peerState === 'connecting' || feed.peerState === 'reconnecting' ? (
+          ) : feed.isSocketConnected || feed.peerState === 'connecting' ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200/80">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
               Connecting
@@ -182,7 +182,7 @@ const StudentLiveFeedCard: React.FC<StudentLiveFeedCardProps> = ({ feed, onInspe
 
       {/* Video Viewport / Offline Placeholder */}
       <div className="relative aspect-4/3 w-full bg-slate-950 flex items-center justify-center overflow-hidden select-none">
-        {feed.stream && feed.peerState === 'connected' ? (
+        {feed.stream ? (
           <>
             <video
               ref={videoRef}
@@ -1174,55 +1174,59 @@ export const AdminLiveMonitoringView: React.FC = () => {
       )}
 
       {/* ── Detailed Candidate Inspection Modal ── */}
-      {inspectedFeed && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs select-none">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full overflow-hidden flex flex-col max-h-[90vh]">
-            {/* Modal Header */}
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-2">
-                <Shield className="w-5 h-5 text-[#0952cc]" />
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    {inspectedFeed.studentName}
-                  </h3>
-                  <p className="text-[11px] font-mono text-slate-500">
-                    {inspectedFeed.uucmsNo} • {inspectedFeed.testTitle}
-                  </p>
+      {inspectedFeed && (() => {
+        const liveFeed = mergedFeeds.find((f) => f.attemptId === inspectedFeed.attemptId) || inspectedFeed;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs select-none">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full overflow-hidden flex flex-col max-h-[90vh]">
+              {/* Modal Header */}
+              <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-5 h-5 text-[#0952cc]" />
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      {liveFeed.studentName}
+                    </h3>
+                    <p className="text-[11px] font-mono text-slate-500">
+                      {liveFeed.uucmsNo} • {liveFeed.testTitle}
+                    </p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => setInspectedFeed(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button
-                onClick={() => setInspectedFeed(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            {/* Modal Video Viewport */}
-            <div className="relative aspect-video w-full bg-slate-950 flex items-center justify-center overflow-hidden">
-              {inspectedFeed.stream && inspectedFeed.peerState === 'connected' ? (
-                <video
-                  autoPlay
-                  playsInline
-                  muted
-                  ref={(el) => {
-                    if (el && inspectedFeed.stream) {
-                      el.srcObject = inspectedFeed.stream;
-                      el.play().catch(() => {});
-                    }
-                  }}
-                  className="w-full h-full object-cover -scale-x-100"
-                />
-              ) : (
-                <div className="text-center text-slate-400 p-6">
-                  <VideoOff className="w-10 h-10 mx-auto mb-2 text-slate-600" />
-                  <p className="text-xs font-bold text-slate-300">Camera Stream Unavailable</p>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Candidate video disconnected or session stopped
-                  </p>
-                </div>
-              )}
-            </div>
+              {/* Modal Video Viewport */}
+              <div className="relative aspect-video w-full bg-slate-950 flex items-center justify-center overflow-hidden">
+                {liveFeed.stream ? (
+                  <video
+                    autoPlay
+                    playsInline
+                    muted
+                    ref={(el) => {
+                      if (el && liveFeed.stream) {
+                        el.srcObject = liveFeed.stream;
+                        el.play().catch(() => {});
+                      }
+                    }}
+                    className="w-full h-full object-cover -scale-x-100"
+                  />
+                ) : (
+                  <div className="text-center text-slate-400 p-6">
+                    <VideoOff className="w-10 h-10 mx-auto mb-2 text-slate-600" />
+                    <p className="text-xs font-bold text-slate-300">Camera Stream Unavailable</p>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      {liveFeed.isSocketConnected
+                        ? 'Connecting candidate video stream...'
+                        : 'Candidate video disconnected or session stopped'}
+                    </p>
+                  </div>
+                )}
+              </div>
 
             {/* Modal Proctoring Details */}
             <div className="p-5 space-y-4 overflow-y-auto">
@@ -1234,31 +1238,31 @@ export const AdminLiveMonitoringView: React.FC = () => {
                   <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-center">
                     <p className="text-[10px] font-bold text-slate-500 uppercase">Camera Off</p>
                     <p className="text-base font-black text-slate-900 mt-1">
-                      {inspectedFeed.violationBreakdown.camera}
+                      {liveFeed.violationBreakdown.camera}
                     </p>
                   </div>
                   <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-center">
                     <p className="text-[10px] font-bold text-slate-500 uppercase">Fullscreen Exit</p>
                     <p className="text-base font-black text-slate-900 mt-1">
-                      {inspectedFeed.violationBreakdown.fullscreen}
+                      {liveFeed.violationBreakdown.fullscreen}
                     </p>
                   </div>
                   <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-center">
                     <p className="text-[10px] font-bold text-slate-500 uppercase">Tab Switch</p>
                     <p className="text-base font-black text-slate-900 mt-1">
-                      {inspectedFeed.violationBreakdown.tab}
+                      {liveFeed.violationBreakdown.tab}
                     </p>
                   </div>
                   <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-center">
                     <p className="text-[10px] font-bold text-slate-500 uppercase">Focus Loss</p>
                     <p className="text-base font-black text-slate-900 mt-1">
-                      {inspectedFeed.violationBreakdown.blur}
+                      {liveFeed.violationBreakdown.blur}
                     </p>
                   </div>
                   <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-center">
                     <p className="text-[10px] font-bold text-slate-500 uppercase">Occlusion</p>
                     <p className="text-base font-black text-slate-900 mt-1">
-                      {inspectedFeed.violationBreakdown.occlusion}
+                      {liveFeed.violationBreakdown.occlusion}
                     </p>
                   </div>
                 </div>
@@ -1269,10 +1273,10 @@ export const AdminLiveMonitoringView: React.FC = () => {
                 <div>
                   <span className="font-bold text-slate-800">Total Proctoring Strikes:</span>
                   <span className="ml-2 font-mono font-black text-slate-900">
-                    {inspectedFeed.exitCount} / 3
+                    {liveFeed.exitCount} / 3
                   </span>
                 </div>
-                {inspectedFeed.exitCount >= 3 && (
+                {liveFeed.exitCount >= 3 && (
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">
                     Exceeded Allowed Strikes
                   </span>
@@ -1291,7 +1295,8 @@ export const AdminLiveMonitoringView: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
+      );
+    })()}
     </div>
   );
 };
