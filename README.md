@@ -23,7 +23,7 @@ The platform aims to replace traditional Google Form-based aptitude tests with a
 - Automatic test submission after repeated violations
 - Automatic test evaluation
 - Student results and performance analytics
-- Live monitoring using admin dashboard 
+- Live video monitoring using admin dashboard 
 
 ### Tech Stack
 ---
