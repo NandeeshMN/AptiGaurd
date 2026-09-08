@@ -125,6 +125,7 @@ Administrators will be able to:
 - Schedule assessments
 - Assign tests to students
 - Monitor test attempts
+- Monitor students live 
 - View student results
 - Analyze assessment performance
 
