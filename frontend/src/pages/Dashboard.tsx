@@ -31,6 +31,7 @@ import {
   Users,
   CheckCheck,
   AlertTriangle,
+  AlertCircle,
   Trash2,
   FileEdit,
   Video
@@ -205,6 +206,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showReportIssueModal, setShowReportIssueModal] = useState(false);
   const [showClearDataModal, setShowClearDataModal] = useState<boolean>(false);
   const [isClearingData, setIsClearingData] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>(() => defaultTab || 'dashboard');
@@ -1954,6 +1956,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                 <User className="w-4.5 h-4.5" />
                 <span>Profile</span>
               </button>
+              <button
+                onClick={() => setShowReportIssueModal(true)}
+                className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all duration-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 mt-1 cursor-pointer"
+              >
+                <AlertCircle className="w-4.5 h-4.5" />
+                <span>Report Issue</span>
+              </button>
             </div>
           </nav>
         </div>
@@ -1972,7 +1981,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
           <button
             onClick={handleLogoutClick}
             disabled={isLoggingOut}
-            className="w-full flex items-center justify-center space-x-2 px-3 py-2 border border-red-200/60 bg-red-50/40 hover:bg-red-50 active:bg-red-100 text-red-600 text-xs font-bold rounded-lg transition-colors duration-200 disabled:opacity-50"
+            className="w-full flex items-center justify-center space-x-2 px-3 py-2 border border-red-200/60 bg-red-50/40 hover:bg-red-50 active:bg-red-100 text-red-600 text-xs font-bold rounded-lg transition-colors duration-200 disabled:opacity-50 cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
             <span>{isLoggingOut ? 'Logging out...' : 'Logout'}</span>
@@ -2031,6 +2040,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                 <BarChart3 className="w-4.5 h-4.5" />
                 <span>Results</span>
               </button>
+
+              <div className="pt-3 border-t border-slate-100 mt-3">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest px-3 mb-1">Account</p>
+                <button
+                  onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-xs font-semibold ${activeTab === 'profile' ? 'bg-blue-50 text-[#0952cc]' : 'text-slate-600'
+                    }`}
+                >
+                  <User className="w-4.5 h-4.5" />
+                  <span>Profile</span>
+                </button>
+                <button
+                  onClick={() => { setShowReportIssueModal(true); setIsMobileMenuOpen(false); }}
+                  className="w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 mt-1 cursor-pointer"
+                >
+                  <AlertCircle className="w-4.5 h-4.5" />
+                  <span>Report Issue</span>
+                </button>
+              </div>
             </nav>
             <div className="pt-4 border-t border-slate-100 mt-auto">
               <div className="flex items-center space-x-3 mb-4">
@@ -2044,7 +2072,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
               <button
                 onClick={handleLogoutClick}
                 disabled={isLoggingOut}
-                className="w-full flex items-center justify-center space-x-2 px-3 py-2 border border-red-200/60 bg-red-50/40 text-red-600 text-xs font-bold rounded-lg"
+                className="w-full flex items-center justify-center space-x-2 px-3 py-2 border border-red-200/60 bg-red-50/40 text-red-600 text-xs font-bold rounded-lg cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
                 <span>Logout</span>
@@ -2575,6 +2603,44 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                 className="w-full py-2 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white text-xs font-bold rounded-lg uppercase tracking-wide focus:outline-none transition-colors"
               >
                 OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Report Issue - Under Development Modal */}
+      {showReportIssueModal && (
+        <div className="fixed inset-0 z-55 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
+          <div className="bg-white w-full max-w-sm rounded-2xl border border-slate-200/80 p-6 shadow-xl text-center space-y-4 relative">
+            <button
+              onClick={() => setShowReportIssueModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus:outline-none transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto border border-amber-100">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h3 className="text-base font-bold text-slate-900">Report Issue</h3>
+              <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                This feature is currently under development.
+              </p>
+              <p className="text-[11px] text-slate-400 leading-normal">
+                If you are experiencing any technical or test-related difficulties, please contact your exam proctor or coordinator.
+              </p>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setShowReportIssueModal(false)}
+                className="w-full py-2.5 bg-[#0952cc] hover:bg-[#0747a6] active:bg-[#084095] text-white text-xs font-bold rounded-lg uppercase tracking-wide focus:outline-none transition-colors cursor-pointer"
+              >
+                Understood
               </button>
             </div>
           </div>
