@@ -9,6 +9,7 @@ import { ResultsView } from './ResultsView';
 import { AdminResultsView } from './AdminResultsView';
 import { AdminStudentsView } from './AdminStudentsView';
 import { AdminLiveMonitoringView } from './AdminLiveMonitoringView';
+import { AdminStudentProgressView } from './AdminStudentProgressView';
 import { ProfileView } from './ProfileView';
 import { CreateTestView } from './CreateTestView';
 // import { Footer } from '../components/Footer';
@@ -22,6 +23,7 @@ import {
   LayoutDashboard,
   ClipboardList,
   BarChart3,
+  TrendingUp,
   User,
   LogOut,
   HelpCircle,
@@ -987,6 +989,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                 <BarChart3 className="w-4.5 h-4.5" />
                 <span>Results</span>
               </button>
+              <button
+                onClick={() => setActiveTab('student-progress')}
+                className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all duration-200 ${activeTab === 'student-progress'
+                    ? 'bg-blue-50 text-[#0952cc]'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+              >
+                <TrendingUp className="w-4.5 h-4.5" />
+                <span>Student Progress</span>
+              </button>
 
               <div className="pt-4">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-3 mb-2">Account</p>
@@ -1100,6 +1112,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
                 >
                   <BarChart3 className="w-4.5 h-4.5" />
                   <span>Results</span>
+                </button>
+                <button
+                  onClick={() => { setActiveTab('student-progress'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-semibold ${activeTab === 'student-progress' ? 'bg-blue-50 text-[#0952cc]' : 'text-slate-600'
+                    }`}
+                >
+                  <TrendingUp className="w-4.5 h-4.5" />
+                  <span>Student Progress</span>
                 </button>
 
                 <div className="pt-3 border-t border-slate-100 mt-3">
@@ -1486,6 +1506,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ defaultTab }) => {
               </div>
             ) : activeTab === 'results' ? (
               <AdminResultsView />
+            ) : activeTab === 'student-progress' ? (
+              <AdminStudentProgressView />
             ) : activeTab === 'monitoring' ? (
               <AdminLiveMonitoringView />
             ) : activeTab === 'students' ? (

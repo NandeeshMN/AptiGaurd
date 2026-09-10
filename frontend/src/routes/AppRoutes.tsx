@@ -33,6 +33,7 @@ const GlobalTitleManager: React.FC = () => {
       '/admin/tests': 'AptiGuard | Tests',
       '/admin/monitoring': 'AptiGuard | Live Monitoring',
       '/admin/results': 'AptiGuard | Results',
+      '/admin/student-progress': 'AptiGuard | Student Progress',
       '/admin/profile': 'AptiGuard | Profile',
     };
 
@@ -134,6 +135,14 @@ const AnimatedRoutes: React.FC = () => {
             element={
               <ProtectedRoute>
                 <Dashboard defaultTab="results" />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/student-progress"
+            element={
+              <ProtectedRoute>
+                <Dashboard defaultTab="student-progress" />
               </ProtectedRoute>
             }
           />
